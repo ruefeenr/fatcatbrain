@@ -40,12 +40,6 @@
            (,,_]    (,_,)
 ```
 
-A playful local context-capture CLI companion for AI project work. A fat cat mascot
-sniffs out useful context from your brain dumps, proposes memory candidates, and only
-stores what you confirm.
-
-The technical core is this loop:
-
 ```text
 Input -> extract candidates -> Memory Inbox -> you confirm/edit -> store memory -> export context
 ```
