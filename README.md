@@ -1,5 +1,45 @@
 # fatcatbrain
 
+```text
+                      _
+            __       / |
+            \ "-..--'_4|_
+ _._____     \ _  _(C "._'._
+((^     '"-._( O_ O "._` '. \
+ `"'--._     \  y_     \   \|
+        '-._  \_ _  __.=-.__,\_
+            `'-(" ,("___       \,_____
+                (_,("___     .-./     '
+                |   C'___    (5)
+                /    ``  '---'-'._```
+               |     ```    |`    '"-._
+               |    ````    \-.`
+               |    ````    |  "._ ``
+               /    ````    |     '-.__
+              |     ```     |
+              |     ```     |
+              |     ```     |
+              |     ```     /
+              |    ````    |
+              |    ```     |
+              |    ```     /
+              |    ```     |
+              /    ```     |
+             |     ```     |
+             |     ```     !
+             |     ```    / '-.___
+             |    ````    !_      ''-
+             /   `   `    | '--._____)
+             |     /|     !
+             !    / |     /
+             |    | |    /
+             |    | |   /
+             |    / |   |
+             /   /  |   |
+            /   /   |   |
+           (,,_]    (,_,)
+```
+
 A playful local context-capture CLI companion for AI project work. A fat cat mascot
 sniffs out useful context from your brain dumps, proposes memory candidates, and only
 stores what you confirm.
@@ -18,7 +58,10 @@ MVP, phases 1-3:
 - JSONL/JSON file storage
 - FakeLLM adapter (deterministic, for the core loop without a server)
 - Ollama adapter (real candidate extraction)
-- CLI commands: `init`, `save`, `brain`, `import`, `inbox`, `memories`
+- Passive capture from chat transcripts (`listen`, `import-chat`)
+- Auto-detected projects with global vs project-scoped memories
+- CLI commands: `init`, `save`, `brain`, `import`, `import-chat`, `listen`,
+  `inbox`, `memories`
 
 Not in scope yet: full project management, quiz/game mode, rich context-pack export,
 SQLite, vector DB, voice/Whisper, OpenAI adapter, Textual TUI.
@@ -37,15 +80,22 @@ uv sync
 
 ## Usage
 
+```text
+ /ᐠ｡ꞈ｡ᐟ\   "Dump your thoughts, I'll sniff out the useful bits."
+```
+
 ```bash
 uv run fcb init                       # interactive setup: choose how the cat thinks
 uv run fcb init --reconfigure         # run the LLM setup again
 uv run fcb save "I prefer FastAPI for small APIs."
+uv run fcb save "Alpha uses Postgres." -p   # scope to the auto-detected project
 uv run fcb brain                      # type line by line, finish with an empty line
 uv run fcb brain --editor             # compose the dump in your $EDITOR
 uv run fcb brain --stdin              # paste a block, finish with CTRL+D
 echo "..." | uv run fcb brain         # piped input is read directly
 uv run fcb import notes.txt           # import a file as a brain dump
+uv run fcb import-chat                 # distill an existing chat history
+uv run fcb listen                     # passively listen to chat transcripts
 uv run fcb inbox                      # review candidates: (s)ave (e)dit (p)roject (d)iscard
 uv run fcb memories                   # list confirmed memory items
 ```
@@ -72,6 +122,10 @@ FCB_LLM=ollama FCB_OLLAMA_MODEL=gpt-oss:20b uv run fcb brain
 Configuration precedence is: environment variables > `config.json` > defaults.
 
 ## Passive capture (listen mode)
+
+```text
+ /ᐠ•ꞈ•ᐟ\   "Ears up. I'm listening while you work."
+```
 
 Instead of actively dumping thoughts, let the cat read your AI chat transcripts and
 distill the essence into the inbox. It reads only *your* messages, keeps just the
@@ -122,14 +176,20 @@ Notes:
 ```text
 $FCB_HOME/
   config.json
-  watch_state.json        # listen-mode progress per transcript file
+  watch_state.json          # listen-mode progress per transcript file
+  global/
+    memory_items.jsonl      # global memories, visible from every project
   projects/
-    default/
+    <project-id>/           # auto-detected from the working directory
       project.json
       raw_inputs.jsonl
       inbox.jsonl
-      memory_items.jsonl
+      memory_items.jsonl    # this project's memories
 ```
+
+The active project is auto-detected from your working directory (the git root's
+folder name), unless you override it with `FCB_PROJECT`. Global memories (`fcb save`
+without `-p`) follow you everywhere; project-scoped ones (`-p`) stay put.
 
 ## Architecture
 
@@ -146,8 +206,24 @@ src/fatcatbrain/
   composition.py # composition root
 ```
 
+## The cat's moods
+
+The mascot changes face with the situation, so the CLI feels alive:
+
+```text
+ /ᐠ｡ꞈ｡ᐟ\    curious   — sniffing, found something, project detected
+ /ᐠ•ꞈ•ᐟ\    working   — thinking / listening
+ /ᐠ≽^•⩊•^≼マ  happy     — saved, all good
+ /ᐠಠ_ಠᐟ\    suspicious — sensitive, needs review, or something's off
+ /ᐠ - ˕ -マ   sleepy    — idle, nothing to do, nap time
+```
+
 ## Tests
 
 ```bash
 uv run pytest
+```
+
+```text
+ /ᐠ≽^•⩊•^≼マ  "All green? Time for a nap."
 ```
