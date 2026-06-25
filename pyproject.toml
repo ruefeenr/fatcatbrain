@@ -1,0 +1,31 @@
+[project]
+name = "fatcatbrain"
+version = "0.1.0"
+description = "A playful local context-capture CLI companion (fat cat mascot) for AI project work."
+readme = "README.md"
+authors = [
+    { name = "Enrique", email = "enrique.ruefenacht@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "pydantic>=2.7",
+    "ollama>=0.3",
+]
+
+[project.scripts]
+fcb = "fatcatbrain.adapters.cli.main:run"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.24,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
