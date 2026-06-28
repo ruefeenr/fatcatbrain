@@ -6,8 +6,25 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
-from .models import MemoryCandidate, MemoryItem
-from .value_objects import GLOBAL_SCOPE, Sensitivity, project_scope
+from .models import (
+    EvidenceQuote,
+    Issue,
+    IssueCandidate,
+    MemoryCandidate,
+    MemoryItem,
+    RawInput,
+    Scope,
+    Session,
+)
+from .value_objects import (
+    GLOBAL_SCOPE,
+    CandidateStatus,
+    Importance,
+    Sensitivity,
+    project_scope,
+)
+
+_UNSET = object()
 
 
 class PrivacyPolicy(BaseModel):
@@ -23,11 +40,75 @@ class PrivacyPolicy(BaseModel):
     default_sensitivity: Sensitivity = "medium"
 
 
+_ISSUE_CANDIDATE_TRANSITIONS: dict[CandidateStatus, set[CandidateStatus]] = {
+    "detected": {"candidate", "rejected"},
+    "candidate": {"confirmed", "edited", "rejected", "merged", "deferred"},
+    "deferred": {
+        "candidate",
+        "confirmed",
+        "edited",
+        "rejected",
+        "merged",
+        "deferred",
+    },
+}
+
+
+def transition_issue_candidate(
+    candidate: IssueCandidate,
+    status: CandidateStatus,
+    *,
+    changed_at: datetime | None = None,
+) -> IssueCandidate:
+    """Apply a valid curation transition without mutating the source object."""
+
+    allowed = _ISSUE_CANDIDATE_TRANSITIONS.get(candidate.status, set())
+    if status not in allowed:
+        raise ValueError(
+            f"Cannot transition issue candidate from {candidate.status!r} "
+            f"to {status!r}."
+        )
+    requires_review = status in ("detected", "candidate", "deferred")
+    return candidate.model_copy(
+        update={
+            "status": status,
+            "requires_user_review": requires_review,
+            "updated_at": changed_at or datetime.now(timezone.utc),
+        },
+        deep=True,
+    )
+
+
+def evidence_quotes_from_raw_input(
+    raw_input: RawInput,
+    quotes: list[str],
+) -> list[EvidenceQuote]:
+    """Keep only deduplicated, verbatim excerpts present in the source input."""
+
+    evidence: list[EvidenceQuote] = []
+    seen: set[str] = set()
+    for quote in quotes:
+        text = quote.strip()
+        if not text or text in seen or text not in raw_input.content:
+            continue
+        seen.add(text)
+        evidence.append(
+            EvidenceQuote(
+                text=text,
+                source_type=raw_input.source,
+                source_input_id=raw_input.id,
+                source_ref=raw_input.source_ref,
+                session_id=raw_input.session_id,
+            )
+        )
+    return evidence
+
+
 def candidate_to_memory_item(
     candidate: MemoryCandidate,
     *,
     scope: str | None = None,
-    project_id: str | None = None,
+    project_id: str | None | object = _UNSET,
     content: str | None = None,
     allow_export: bool = True,
 ) -> MemoryItem:
@@ -38,19 +119,147 @@ def candidate_to_memory_item(
     """
 
     effective_scope = scope or candidate.suggested_scope or GLOBAL_SCOPE
+    effective_project_id = (
+        candidate.project_id if project_id is _UNSET else project_id
+    )
     now = datetime.now(timezone.utc)
     return MemoryItem(
         content=content if content is not None else candidate.content,
         memory_type=candidate.memory_type,
         scope=effective_scope,
-        project_id=project_id if project_id is not None else candidate.project_id,
+        project_id=effective_project_id,
         sensitivity=candidate.sensitivity,
         allow_export=allow_export,
         confidence=candidate.confidence,
         status="active",
         source_input_ids=[candidate.source_input_id],
+        source_candidate_ids=[candidate.id],
+        session_ids=[candidate.session_id] if candidate.session_id else [],
+        user_intention=candidate.user_intention,
+        reuse_hint=candidate.reuse_hint,
+        evidence=candidate.evidence,
+        keywords=candidate.keywords,
         created_at=now,
         updated_at=now,
+    )
+
+
+def confirm_issue(
+    candidate: IssueCandidate,
+    *,
+    scope: Scope,
+    importance: Importance,
+    linked_memory_ids: list[str] | None = None,
+    title: str | None = None,
+    description: str | None = None,
+) -> Issue:
+    """Create a confirmed issue from an explicit user review decision."""
+
+    if candidate.status not in ("candidate", "deferred", "edited"):
+        raise ValueError(f"Cannot confirm issue candidate in status {candidate.status!r}.")
+    return Issue(
+        question=title or candidate.question,
+        learning_goal=description or candidate.learning_goal,
+        target_memory_types=candidate.target_memory_types,
+        answer_signals=candidate.answer_signals,
+        scope=scope,
+        importance=importance,
+        evidence=candidate.evidence,
+        linked_memory_ids=list(linked_memory_ids or []),
+        linked_memory_candidate_ids=candidate.linked_memory_candidate_ids,
+        keywords=candidate.keywords,
+        source_candidate_ids=[candidate.id],
+        session_id=candidate.session_id,
+        observed_in_project_id=candidate.observed_in_project_id,
+    )
+
+
+def merge_issue_candidate(
+    candidate: IssueCandidate,
+    target: Issue,
+    *,
+    linked_memory_ids: list[str] | None = None,
+) -> Issue:
+    """Merge supporting context into an existing issue without changing its scope."""
+
+    if candidate.status not in ("candidate", "deferred", "edited"):
+        raise ValueError(f"Cannot merge issue candidate in status {candidate.status!r}.")
+
+    evidence_by_key = {
+        (
+            evidence.text,
+            evidence.source_input_id,
+            evidence.session_id,
+        ): evidence
+        for evidence in [*target.evidence, *candidate.evidence]
+    }
+    return target.model_copy(
+        update={
+            "evidence": list(evidence_by_key.values()),
+            "linked_memory_ids": list(
+                dict.fromkeys(
+                    [*target.linked_memory_ids, *(linked_memory_ids or [])]
+                )
+            ),
+            "linked_memory_candidate_ids": list(
+                dict.fromkeys(
+                    [
+                        *target.linked_memory_candidate_ids,
+                        *candidate.linked_memory_candidate_ids,
+                    ]
+                )
+            ),
+            "keywords": list(dict.fromkeys([*target.keywords, *candidate.keywords])),
+            "target_memory_types": list(
+                dict.fromkeys(
+                    [*target.target_memory_types, *candidate.target_memory_types]
+                )
+            ),
+            "answer_signals": list(
+                dict.fromkeys([*target.answer_signals, *candidate.answer_signals])
+            ),
+            "source_candidate_ids": list(
+                dict.fromkeys([*target.source_candidate_ids, candidate.id])
+            ),
+            "updated_at": datetime.now(timezone.utc),
+        },
+        deep=True,
+    )
+
+
+def end_session(
+    session: Session,
+    *,
+    ended_at: datetime | None = None,
+) -> Session:
+    """Close an active capture session."""
+
+    if session.status != "active":
+        raise ValueError(f"Cannot end session in status {session.status!r}.")
+    return session.model_copy(
+        update={
+            "status": "ended",
+            "ended_at": ended_at or datetime.now(timezone.utc),
+        },
+        deep=True,
+    )
+
+
+def mark_session_reviewed(
+    session: Session,
+    *,
+    reviewed_at: datetime | None = None,
+) -> Session:
+    """Mark an ended session reviewed after its pending candidates are resolved."""
+
+    if session.status != "ended":
+        raise ValueError(f"Cannot review session in status {session.status!r}.")
+    return session.model_copy(
+        update={
+            "status": "reviewed",
+            "reviewed_at": reviewed_at or datetime.now(timezone.utc),
+        },
+        deep=True,
     )
 
 

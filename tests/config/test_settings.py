@@ -21,7 +21,7 @@ def _write_config(home: Path, data: dict) -> None:
 
 def test_defaults_when_no_config(tmp_path: Path):
     s = Settings.from_env({"FATCAT_HOME": str(tmp_path / "home")})
-    assert s.llm == "fake"
+    assert s.llm == "ollama"
     assert s.ollama_model == DEFAULT_OLLAMA_MODEL
 
 
@@ -36,8 +36,8 @@ def test_config_file_values_are_used(tmp_path: Path):
 def test_env_overrides_config(tmp_path: Path):
     home = tmp_path / "home"
     _write_config(home, {"llm": "ollama", "ollama_model": "qwen2.5"})
-    s = Settings.from_env({"FATCAT_HOME": str(home), "FATCAT_LLM": "fake"})
-    assert s.llm == "fake"
+    s = Settings.from_env({"FATCAT_HOME": str(home), "FATCAT_LLM": "custom"})
+    assert s.llm == "custom"
     # ollama_model still comes from config since env didn't override it.
     assert s.ollama_model == "qwen2.5"
 
@@ -47,7 +47,16 @@ def test_corrupt_config_falls_back_to_defaults(tmp_path: Path):
     home.mkdir(parents=True)
     (home / "config.json").write_text("{ not json", encoding="utf-8")
     s = Settings.from_env({"FATCAT_HOME": str(home)})
-    assert s.llm == "fake"
+    assert s.llm == "ollama"
+
+
+def test_legacy_fake_config_migrates_to_ollama(tmp_path: Path):
+    home = tmp_path / "home"
+    _write_config(home, {"llm": "fake", "ollama_model": "gpt-oss:20b"})
+
+    settings = Settings.from_env({"FATCAT_HOME": str(home)})
+
+    assert settings.llm == "ollama"
 
 
 def test_slugify_project():

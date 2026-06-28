@@ -20,6 +20,11 @@ class MemoryRepository(Protocol):
         """Return an existing item with the same normalized content and scope."""
         ...
 
+    def find_by_source_candidate_id(
+        self, candidate_id: str
+    ) -> MemoryItem | None:
+        ...
+
     def list_by_project(self, project_id: str) -> list[MemoryItem]:
         ...
 

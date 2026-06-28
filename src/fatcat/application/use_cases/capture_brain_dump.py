@@ -1,21 +1,23 @@
 """Use case: capture a brain dump and fill the inbox with candidates.
 
-Flow: store the raw input -> ask the LLM for candidates -> store candidates in the
-inbox. Nothing is persisted as a confirmed memory here; that requires review.
+Flow: store the raw input -> ask the LLM for candidates -> route memory and issue
+proposals to their inboxes. Nothing is confirmed here; that requires user review.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fatcat.application.ports import (
     InboxRepository,
+    IssueCandidateRepository,
+    IssueRepository,
     LLMPort,
     MemoryRepository,
     ProjectRepository,
     RawInputRepository,
 )
-from fatcat.domain.models import MemoryCandidate, RawInput
+from fatcat.domain.models import IssueCandidate, MemoryCandidate, RawInput
 from fatcat.domain.value_objects import SourceType
 
 
@@ -25,10 +27,15 @@ class CaptureResult:
 
     raw_input: RawInput
     candidates: list[MemoryCandidate]
+    issue_candidates: list[IssueCandidate] = field(default_factory=list)
+
+    @property
+    def total_candidates(self) -> int:
+        return len(self.candidates) + len(self.issue_candidates)
 
 
 class CaptureBrainDump:
-    """Turn free text into reviewable memory candidates."""
+    """Turn free text into reviewable memory and issue candidates."""
 
     def __init__(
         self,
@@ -38,6 +45,8 @@ class CaptureBrainDump:
         *,
         memory_repo: MemoryRepository | None = None,
         project_repo: ProjectRepository | None = None,
+        issue_candidate_repo: IssueCandidateRepository | None = None,
+        issue_repo: IssueRepository | None = None,
         store_raw_input: bool = True,
         min_confidence: float = 0.0,
     ) -> None:
@@ -46,6 +55,8 @@ class CaptureBrainDump:
         self._inbox_repo = inbox_repo
         self._memory_repo = memory_repo
         self._project_repo = project_repo
+        self._issue_candidate_repo = issue_candidate_repo
+        self._issue_repo = issue_repo
         self._store_raw_input = store_raw_input
         self._min_confidence = min_confidence
 
@@ -55,12 +66,20 @@ class CaptureBrainDump:
         *,
         project_id: str | None = None,
         source: SourceType = "brain_dump",
+        session_id: str | None = None,
+        source_ref: str | None = None,
     ) -> CaptureResult:
         content = content.strip()
         if not content:
             raise ValueError("Cannot capture an empty brain dump.")
 
-        raw_input = RawInput(content=content, source=source, project_id=project_id)
+        raw_input = RawInput(
+            content=content,
+            source=source,
+            project_id=project_id,
+            session_id=session_id,
+            source_ref=source_ref,
+        )
         if self._store_raw_input:
             self._raw_input_repo.save(raw_input)
 
@@ -71,26 +90,57 @@ class CaptureBrainDump:
         known_context = None
         if self._memory_repo is not None:
             known_context = (
-                self._memory_repo.list_by_project(project_id)
+                self._memory_repo.list_global()
+                + self._memory_repo.list_by_project(project_id)
                 if project_id
                 else self._memory_repo.list_global()
             )
 
-        candidates = self._llm.extract_memory_candidates(
-            raw_input, project=project, known_context=known_context
+        known_issues = None
+        if self._issue_repo is not None:
+            known_issues = (
+                self._issue_repo.list_global()
+                + self._issue_repo.list_by_project(project_id)
+                if project_id
+                else self._issue_repo.list_global()
+            )
+
+        extraction = self._llm.extract_candidates(
+            raw_input,
+            project=project,
+            known_context=known_context,
+            known_issues=known_issues,
         )
+        candidates = extraction.memory_candidates
+        issue_candidates = extraction.issue_candidates
         # The LLM may not know the active project; make sure candidates carry it.
         for candidate in candidates:
             if candidate.project_id is None:
                 candidate.project_id = project_id
+            if candidate.session_id is None:
+                candidate.session_id = session_id
+        for candidate in issue_candidates:
+            if candidate.observed_in_project_id is None:
+                candidate.observed_in_project_id = project_id
+            if candidate.session_id is None:
+                candidate.session_id = session_id
 
         # Drop low-confidence noise (useful for passive capture).
         if self._min_confidence > 0.0:
             candidates = [
                 c for c in candidates if c.confidence >= self._min_confidence
             ]
+            issue_candidates = [
+                c for c in issue_candidates if c.confidence >= self._min_confidence
+            ]
 
         if candidates:
             self._inbox_repo.add_candidates(candidates)
+        if issue_candidates and self._issue_candidate_repo is not None:
+            self._issue_candidate_repo.add_candidates(issue_candidates)
 
-        return CaptureResult(raw_input=raw_input, candidates=candidates)
+        return CaptureResult(
+            raw_input=raw_input,
+            candidates=candidates,
+            issue_candidates=issue_candidates,
+        )

@@ -52,7 +52,11 @@ def read_user_texts(path: Path) -> list[str]:
     if path.is_file():
         files = [path]
     elif path.is_dir():
-        files = sorted(path.rglob("*.jsonl"))
+        files = sorted(
+            file
+            for file in path.rglob("*.jsonl")
+            if "subagents" not in file.parts
+        )
     else:
         files = []
 
@@ -74,6 +78,18 @@ def read_user_texts(path: Path) -> list[str]:
             if text:
                 texts.append(text)
     return texts
+
+
+def latest_transcript_file(path: Path) -> Path | None:
+    """Return the most recently updated main transcript below a Cursor project."""
+
+    path = Path(path)
+    files = [
+        file
+        for file in path.rglob("*.jsonl")
+        if "subagents" not in file.parts
+    ]
+    return max(files, key=lambda file: file.stat().st_mtime, default=None)
 
 
 class CursorTranscriptSource:
@@ -104,7 +120,11 @@ class CursorTranscriptSource:
     def _transcript_files(self) -> list[Path]:
         if not self._dir.exists():
             return []
-        return sorted(self._dir.rglob("*.jsonl"))
+        return sorted(
+            file
+            for file in self._dir.rglob("*.jsonl")
+            if "subagents" not in file.parts
+        )
 
     def poll(self) -> list[str]:
         state = self._load_state()

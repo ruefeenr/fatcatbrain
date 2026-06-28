@@ -72,6 +72,20 @@ def test_memory_repository_find_duplicate(tmp_path: Path):
     assert repo.find_duplicate("something else", None) is None
 
 
+def test_memory_repository_finds_item_by_source_candidate(tmp_path: Path):
+    repo = JsonlMemoryRepository(tmp_path / "memories.jsonl")
+    item = MemoryItem(
+        content="User confirms issue candidates.",
+        memory_type="principle",
+        scope="global",
+        source_candidate_ids=["cand_1"],
+    )
+    repo.save(item)
+
+    assert repo.find_by_source_candidate_id("cand_1") == item
+    assert repo.find_by_source_candidate_id("missing") is None
+
+
 def test_scoped_memory_routes_by_scope(tmp_path: Path):
     g = JsonlMemoryRepository(tmp_path / "global.jsonl")
     p = JsonlMemoryRepository(tmp_path / "proj.jsonl")

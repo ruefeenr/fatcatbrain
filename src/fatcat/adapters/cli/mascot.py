@@ -76,11 +76,25 @@ class MascotRenderer:
         return _say(FACE_CURIOUS, f"I found {count} {noun}.")
 
     def inbox_empty(self) -> str:
-        return _say(FACE_IDLE, "No pending memories. Cat is sleeping.")
+        return _say(FACE_IDLE, "No pending candidates. Cat is sleeping.")
 
     def inbox_intro(self, count: int) -> str:
         noun = "thought" if count == 1 else "thoughts"
         return _say(FACE_CURIOUS, f"{count} {noun} waiting for your review.")
+
+    def memory_inbox_intro(self, count: int) -> str:
+        noun = "memory proposal" if count == 1 else "memory proposals"
+        return _say(
+            FACE_CURIOUS,
+            f"{count} {noun}: reusable context that can be saved as memory.",
+        )
+
+    def issue_inbox_intro(self, count: int) -> str:
+        noun = "learning issue proposal" if count == 1 else "learning issue proposals"
+        return _say(
+            FACE_CURIOUS,
+            f"{count} {noun}: questions that may help me understand how you work.",
+        )
 
     def candidate_intro(self, candidate: MemoryCandidate) -> str:
         """A mood line shown before a candidate, reflecting its nature."""

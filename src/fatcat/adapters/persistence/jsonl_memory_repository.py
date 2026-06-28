@@ -35,6 +35,18 @@ class JsonlMemoryRepository:
                 return item
         return None
 
+    def find_by_source_candidate_id(
+        self, candidate_id: str
+    ) -> MemoryItem | None:
+        return next(
+            (
+                item
+                for item in self.list_all()
+                if candidate_id in item.source_candidate_ids
+            ),
+            None,
+        )
+
     def list_all(self) -> list[MemoryItem]:
         return [MemoryItem.model_validate(rec) for rec in read_jsonl(self._path)]
 

@@ -2,8 +2,8 @@
 
 Environment variables:
     FATCAT_HOME          Storage root directory       (default: ~/.fatcat)
-    FATCAT_LLM           "fake" or "ollama"           (default: fake)
-    FATCAT_OLLAMA_MODEL  Ollama model name            (default: llama3.1)
+    FATCAT_LLM           LLM adapter                   (default: ollama)
+    FATCAT_OLLAMA_MODEL  Ollama model name            (default: gpt-oss:20b)
     FATCAT_OLLAMA_HOST   Ollama host URL              (default: ollama's own default)
     FATCAT_PROJECT       Active project id            (default: "default")
     FATCAT_TRANSCRIPTS_DIR  Dir to watch in listen mode (default: none)
@@ -44,7 +44,7 @@ def detect_project_id(start: Path | None = None) -> str:
     """Best-effort project id derived from the current working directory."""
 
     return slugify_project(find_project_root(start).name)
-DEFAULT_OLLAMA_MODEL = "llama3.1"
+DEFAULT_OLLAMA_MODEL = "gpt-oss:20b"
 DEFAULT_MIN_CONFIDENCE = 0.6
 DEFAULT_LISTEN_INTERVAL = 10.0
 
@@ -101,10 +101,25 @@ class StoragePaths:
     def memory_items_file(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "memory_items.jsonl"
 
+    def issue_candidates_file(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "issue_inbox.jsonl"
+
+    def issues_file(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "issues.jsonl"
+
+    def sessions_file(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "sessions.jsonl"
+
     @property
     def global_memory_items_file(self) -> Path:
         """Shared store for global memories, visible from every project."""
         return self.home / "global" / "memory_items.jsonl"
+
+    @property
+    def global_issues_file(self) -> Path:
+        """Shared store for confirmed non-project issues."""
+
+        return self.home / "global" / "issues.jsonl"
 
     @property
     def watch_state_file(self) -> Path:
@@ -148,9 +163,14 @@ class Settings:
             return default
 
         transcripts_raw = pick("FATCAT_TRANSCRIPTS_DIR", "transcripts_dir", None)
+        llm = str(pick("FATCAT_LLM", "llm", "ollama")).strip().lower()
+        # Transparently migrate the former deterministic runtime adapter.
+        if llm == "fake":
+            llm = "ollama"
+
         return cls(
             home=home,
-            llm=str(pick("FATCAT_LLM", "llm", "fake")).strip().lower(),
+            llm=llm,
             ollama_model=str(pick("FATCAT_OLLAMA_MODEL", "ollama_model", DEFAULT_OLLAMA_MODEL)),
             ollama_host=pick("FATCAT_OLLAMA_HOST", "ollama_host", None) or None,
             project_id=str(pick("FATCAT_PROJECT", "default_project", detect_project_id())),

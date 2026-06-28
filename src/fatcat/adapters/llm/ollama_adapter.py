@@ -14,7 +14,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from fatcat.domain.models import MemoryCandidate, MemoryItem, Project, RawInput
+from fatcat.application.ports.llm_port import CandidateExtraction
+from fatcat.domain.models import Issue, MemoryCandidate, MemoryItem, Project, RawInput
 
 from .errors import LLMExtractionError
 from .prompts import SYSTEM_PROMPT, build_user_prompt
@@ -26,7 +27,7 @@ class OllamaAdapter:
 
     def __init__(
         self,
-        model: str = "llama3.1",
+        model: str = "gpt-oss:20b",
         *,
         host: str | None = None,
         client: Any | None = None,
@@ -46,13 +47,19 @@ class OllamaAdapter:
 
             self._client = Client(host=host) if host else Client()
 
-    def extract_memory_candidates(
+    def extract_candidates(
         self,
         raw_input: RawInput,
         project: Project | None = None,
         known_context: list[MemoryItem] | None = None,
-    ) -> list[MemoryCandidate]:
-        user_prompt = build_user_prompt(raw_input, project, known_context)
+        known_issues: list[Issue] | None = None,
+    ) -> CandidateExtraction:
+        user_prompt = build_user_prompt(
+            raw_input,
+            project,
+            known_context,
+            known_issues,
+        )
         try:
             response = self._client.chat(
                 model=self._model,
@@ -71,12 +78,26 @@ class OllamaAdapter:
         content = _response_content(response)
         return self._parse(content, raw_input, project)
 
+    def extract_memory_candidates(
+        self,
+        raw_input: RawInput,
+        project: Project | None = None,
+        known_context: list[MemoryItem] | None = None,
+    ) -> list[MemoryCandidate]:
+        """Compatibility wrapper for callers using the v1 adapter API."""
+
+        return self.extract_candidates(
+            raw_input,
+            project,
+            known_context,
+        ).memory_candidates
+
     def _parse(
         self,
         content: str,
         raw_input: RawInput,
         project: Project | None,
-    ) -> list[MemoryCandidate]:
+    ) -> CandidateExtraction:
         try:
             data = json.loads(content)
             extraction = LLMExtractionOut.model_validate(data)
@@ -87,13 +108,23 @@ class OllamaAdapter:
                 raw_output=content,
             ) from exc
 
-        project_id = project.id if project is not None else None
-        return [
-            item.to_candidate(
-                source_input_id=raw_input.id, project_id=project_id
-            )
-            for item in extraction.candidates
+        project_id = project.id if project is not None else raw_input.project_id
+        memory_candidates = [
+            item.to_candidate(raw_input=raw_input, project_id=project_id)
+            for item in extraction.memory_candidates
         ]
+        issue_candidates = [
+            item.to_candidate(
+                raw_input=raw_input,
+                project_id=project_id,
+                memory_candidates=memory_candidates,
+            )
+            for item in extraction.issue_candidates
+        ]
+        return CandidateExtraction(
+            memory_candidates=memory_candidates,
+            issue_candidates=issue_candidates,
+        )
 
     def _log_failure(self, content: str) -> None:
         if self._failure_log_path is None:

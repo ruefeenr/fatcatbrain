@@ -96,6 +96,23 @@ def test_review_project_only_assigns_active_project_to_global_candidate():
     assert mem.items[0].scope == "project:alpha"
 
 
+def test_review_can_correct_scope_without_trapping_domain_memory_in_project():
+    cand = _candidate(
+        suggested_scope="project:fatcat",
+        project_id="fatcat",
+    )
+    uc, _, mem = _setup(cand)
+
+    result = uc.execute(
+        cand.id,
+        "save",
+        scope="domain:software-development",
+    )
+
+    assert result.memory_item.scope == "domain:software-development"
+    assert result.memory_item.project_id is None
+
+
 def test_review_unknown_candidate_raises():
     uc, _, _ = _setup(_candidate())
     with pytest.raises(KeyError):

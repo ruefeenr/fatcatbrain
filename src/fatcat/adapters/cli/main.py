@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from enum import Enum
 from pathlib import Path
 
 import typer
@@ -18,26 +19,49 @@ from fatcat.adapters.cli.mascot import MascotRenderer
 from fatcat.adapters.cli.render import (
     console,
     render_candidate,
+    render_issue_candidate,
+    render_issue_table,
     render_memory_table,
+    render_session_table,
 )
 from fatcat.adapters.llm.errors import LLMExtractionError
 from fatcat.application.use_cases.capture_brain_dump import CaptureResult
-from fatcat.composition import Container, build_container, build_ingest_source
+from fatcat.composition import (
+    Container,
+    build_codex_ingest_source,
+    build_codex_session_source,
+    build_container,
+    build_ingest_source,
+)
 from fatcat.config import Settings
 from fatcat.config.settings import (
     DEFAULT_PROJECT_ID,
     find_project_root,
     slugify_project,
 )
-from fatcat.domain.models import Project
-from fatcat.domain.value_objects import MemoryType
+from fatcat.domain.models import IssueCandidate, Project, Scope
+from fatcat.domain.value_objects import MemoryType, SourceType
 
 app = typer.Typer(
     add_completion=False,
-    help="fatcat (fcat): a playful local context-capture companion.",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help=(
+        "FatCat learns how you prefer to work from your own notes and AI "
+        "conversations.\n\n"
+        "Use start to begin, review to check what FatCat noticed, and show to "
+        "see what it currently knows. Nothing is confirmed without your review."
+    ),
+    epilog="Use 'fcat COMMAND --help' to see every option for a command.",
     no_args_is_help=True,
 )
 mascot = MascotRenderer()
+
+
+class ListenSource(str, Enum):
+    """Conversation providers supported by passive listening."""
+
+    cursor = "cursor"
+    codex = "codex"
 
 
 def _container() -> Container:
@@ -54,8 +78,8 @@ def _auto_transcripts_dir(
     """
 
     home = home or Path.home()
-    cwd = cwd or Path.cwd()
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", str(cwd)).strip("-")
+    project_root = find_project_root(cwd or Path.cwd())
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", str(project_root)).strip("-")
     candidate = home / ".cursor" / "projects" / slug / "agent-transcripts"
     return candidate if candidate.exists() else None
 
@@ -174,20 +198,27 @@ def _capture_and_report(
     *,
     project_id: str | None,
     source: str = "brain_dump",
-) -> None:
+    session_id: str | None = None,
+    source_ref: str | None = None,
+) -> CaptureResult:
     """Run a capture, handling LLM failures gracefully."""
 
     try:
         with console.status(mascot.thinking(), spinner="dots"):
             result: CaptureResult = container.capture_brain_dump().execute(
-                text, project_id=project_id, source=source  # type: ignore[arg-type]
+                text,
+                project_id=project_id,
+                source=source,  # type: ignore[arg-type]
+                session_id=session_id,
+                source_ref=source_ref,
             )
     except LLMExtractionError as exc:
         console.print(f"[red]The LLM could not produce valid candidates.[/red]\n{exc}")
         raise typer.Exit(code=1)
-    console.print(mascot.candidates_found(len(result.candidates)))
-    if result.candidates:
-        console.print(f"Run [bold]{_invocation('inbox')}[/bold] to review them.")
+    console.print(mascot.candidates_found(result.total_candidates))
+    if result.total_candidates:
+        console.print(f"Run [bold]{_invocation('review')}[/bold] to review them.")
+    return result
 
 
 def _write_config(settings: Settings, *, llm: str, ollama_model: str) -> None:
@@ -274,32 +305,56 @@ def _print_next_steps() -> None:
     console.print()
     console.print(mascot.ask("Here's how we work together:"))
 
-    auto = _auto_transcripts_dir()
-    if auto is not None:
-        listen_cmd = _invocation("listen")
-        listen_desc = "listen while you chat; I keep only the essence"
-    else:
-        listen_cmd = _invocation("listen --dir <folder>")
-        listen_desc = "listen to a transcript folder for new thoughts"
-
     steps = [
-        (listen_cmd, listen_desc),
-        (_invocation("brain"), "hand me a thought yourself, any time"),
-        (_invocation("inbox"), "review what I caught - nothing is kept without your OK"),
-        (_invocation("memories"), "see what we've remembered together"),
+        (_invocation("start"), "detect your work and listen in the background"),
+        (_invocation("review"), "check what I learned and what I am unsure about"),
+        (_invocation("show"), "see what I currently know about how you work"),
+        (_invocation("stop"), "stop listening"),
     ]
     width = max(len(cmd) for cmd, _ in steps)
     for cmd, desc in steps:
         padding = " " * (width - len(cmd) + 3)
         console.print(f"  [bold]{cmd}[/bold]{padding}[dim]{desc}[/dim]")
 
+    console.print("  [dim]Run fcat -h to see advanced commands.[/dim]")
+
+
+def _print_how_it_works(settings: Settings) -> None:
+    """Explain the product flow before asking setup questions."""
+
+    console.print()
+    console.print("[bold]How FatCat works[/bold]")
     console.print(
-        "  [dim]Tip: add --daemon to listen in the background "
-        "(--status / --stop to manage it).[/dim]"
+        "  [bold]1. Capture[/bold]  Give FatCat a brain dump or import/listen "
+        "to a chat."
     )
+    console.print(
+        "  [bold]2. Propose[/bold]  Your local Ollama model suggests two distinct things:"
+    )
+    console.print(
+        "     • [cyan]Memory proposals[/cyan] — reusable decisions, preferences "
+        "and context"
+    )
+    console.print(
+        "     • [yellow]Learning issue proposals[/yellow] — unanswered questions "
+        "about how you prefer to work"
+    )
+    console.print(
+        "  [bold]3. Review[/bold]   Proposals wait in the inbox; nothing is "
+        "confirmed automatically."
+    )
+    console.print(
+        "  [bold]4. Store[/bold]    Confirmed memories and learning questions "
+        "stay locally under "
+        f"[bold]{settings.home}[/bold]."
+    )
+    console.print(
+        "  [dim]The active project is detected from the current Git repository.[/dim]"
+    )
+    console.print()
 
 
-@app.command()
+@app.command(rich_help_panel="Setup")
 def init(
     reconfigure: bool = typer.Option(
         False, "--reconfigure", help="Force the interactive LLM setup again."
@@ -310,6 +365,7 @@ def init(
     settings = Settings.from_env()
     settings.paths.project_dir(settings.project_id).mkdir(parents=True, exist_ok=True)
     console.print(mascot.greeting())
+    _print_how_it_works(settings)
 
     llm, model = settings.llm, settings.ollama_model
     already_configured = settings.paths.config_file.exists()
@@ -337,7 +393,92 @@ def init(
     _print_next_steps()
 
 
-@app.command()
+def _detect_active_conversation():
+    """Return the most recently active supported conversation source."""
+
+    candidates: list[tuple[float, str, Path | None, str]] = []
+
+    cursor_dir = _auto_transcripts_dir()
+    if cursor_dir is not None:
+        from fatcat.adapters.ingest import latest_transcript_file
+
+        latest_cursor = latest_transcript_file(cursor_dir)
+        if latest_cursor is not None:
+            candidates.append(
+                (
+                    latest_cursor.stat().st_mtime,
+                    "cursor",
+                    cursor_dir,
+                    f"Cursor conversation in {find_project_root().name}",
+                )
+            )
+
+    codex_document = build_codex_session_source().latest()
+    if codex_document is not None:
+        candidates.append(
+            (
+                codex_document.updated_at.timestamp(),
+                "codex",
+                None,
+                f"Codex conversation '{codex_document.title}'",
+            )
+        )
+
+    if not candidates:
+        return None
+    _, source_name, directory, description = max(candidates, key=lambda item: item[0])
+    return source_name, directory, description
+
+
+@app.command(rich_help_panel="Everyday")
+def start() -> None:
+    """Automatically detect the current work and start learning in the background."""
+
+    settings = Settings.from_env()
+    if not settings.paths.config_file.exists():
+        _write_config(
+            settings,
+            llm=settings.llm,
+            ollama_model=settings.ollama_model,
+        )
+    container = build_container(settings)
+    project = _ensure_project(container)
+
+    detected = _detect_active_conversation()
+    if detected is None:
+        console.print(
+            mascot.confused(
+                "I could not find an active Cursor or Codex conversation.\n"
+                f"   You can still tell me something with: {_invocation('brain')}"
+            )
+        )
+        raise typer.Exit(code=2)
+
+    problem = _llm_preflight(settings)
+    if problem is not None:
+        console.print(mascot.confused(problem))
+        raise typer.Exit(code=2)
+
+    source_name, directory, description = detected
+    console.print(mascot.info(f"Found {description}."))
+    console.print(mascot.info(f"Learning for project: {project.name}."))
+    _start_daemon(
+        settings,
+        directory,
+        None,
+        True,
+        source_name,
+    )
+
+
+@app.command(rich_help_panel="Everyday")
+def stop() -> None:
+    """Stop background learning."""
+
+    _stop_daemon(Settings.from_env())
+
+
+@app.command(rich_help_panel="Advanced")
 def save(
     thought: str = typer.Argument(..., help="The thought to remember."),
     memory_type: MemoryType = typer.Option(
@@ -374,7 +515,7 @@ def _read_lines_interactively() -> str:
     return "\n".join(lines)
 
 
-@app.command()
+@app.command(rich_help_panel="Advanced")
 def brain(
     project_scoped: bool = typer.Option(
         False, "--project", "-p", help="Scope candidates to the active project."
@@ -420,10 +561,26 @@ def brain(
         raise typer.Exit(code=0)
 
     project_id = container.project_id if project_scoped else None
-    _capture_and_report(container, text, project_id=project_id)
+    session = container.session_lifecycle().start(
+        source="brain_dump",
+        project_id=container.project_id,
+        title="Brain dump",
+    )
+    _capture_and_report(
+        container,
+        text,
+        project_id=project_id,
+        session_id=session.id,
+    )
+    container.session_lifecycle().end(session.id)
+    if sys.stdin.isatty() and typer.confirm(
+        "Review this session now?",
+        default=True,
+    ):
+        _review_candidates(container, session_id=session.id)
 
 
-@app.command("import")
+@app.command("import", rich_help_panel="Advanced")
 def import_file(
     file: Path = typer.Argument(..., exists=True, readable=True, help="File to import."),
     project_scoped: bool = typer.Option(
@@ -443,7 +600,7 @@ def import_file(
     _capture_and_report(container, text, project_id=project_id, source="import")
 
 
-@app.command("import-chat")
+@app.command("import-chat", rich_help_panel="Advanced")
 def import_chat(
     path: Path = typer.Argument(
         None,
@@ -464,13 +621,14 @@ def import_chat(
     already discussed. Reads only your own messages; stores no raw text.
     """
 
-    from fatcat.adapters.ingest import read_user_texts
+    from fatcat.adapters.ingest import latest_transcript_file, read_user_texts
 
     settings = Settings.from_env()
     container = build_container(settings)
     _ensure_project(container, prompt_name=project_scoped)
 
     target = path
+    auto_selected = target is None
     if target is None:
         target = _auto_transcripts_dir()
         if target is None:
@@ -484,6 +642,12 @@ def import_chat(
         console.print(f"[red]Path not found:[/red] {target}")
         raise typer.Exit(code=2)
 
+    if auto_selected and target.is_dir():
+        latest = latest_transcript_file(target)
+        if latest is not None:
+            target = latest
+            console.print(mascot.info("Using the latest Cursor conversation."))
+
     texts = read_user_texts(target)
     if not texts:
         console.print(mascot.candidates_found(0))
@@ -496,6 +660,12 @@ def import_chat(
 
     capture = container.passive_capture()
     project_id = container.project_id if project_scoped else None
+    session = container.session_lifecycle().start(
+        source="transcript",
+        project_id=container.project_id,
+        source_ref=str(target),
+        title=f"Cursor import: {target.stem if target.is_file() else target.name}",
+    )
     console.print(
         mascot.info(f"Reading {len(texts)} of your messages from the history...")
     )
@@ -506,78 +676,457 @@ def import_chat(
             for text in texts:
                 with console.status(mascot.thinking(), spinner="dots"):
                     result = capture.execute(
-                        text, project_id=project_id, source="transcript"
+                        text,
+                        project_id=project_id,
+                        source="transcript",
+                        session_id=session.id,
+                        source_ref=str(target),
                     )
-                added += len(result.candidates)
+                added += result.total_candidates
         else:
             combined = "\n\n".join(texts)
             with console.status(mascot.thinking(), spinner="dots"):
                 result = capture.execute(
-                    combined, project_id=project_id, source="transcript"
+                    combined,
+                    project_id=project_id,
+                    source="transcript",
+                    session_id=session.id,
+                    source_ref=str(target),
                 )
-            added = len(result.candidates)
+            added = result.total_candidates
     except LLMExtractionError as exc:
+        container.session_lifecycle().end(session.id)
         console.print(mascot.confused(f"The LLM isn't healthy:\n   {exc}"))
         raise typer.Exit(code=1)
 
+    container.session_lifecycle().end(session.id)
     console.print(mascot.candidates_found(added))
     if added:
-        console.print(f"Run [bold]{_invocation('inbox')}[/bold] to review them.")
+        console.print(
+            f"Run [bold]{_invocation(f'review {session.id}')}[/bold] "
+            "to review this session."
+        )
 
 
-@app.command()
-def inbox() -> None:
-    """Review pending memory candidates: save / edit / project only / discard."""
+@app.command("import-codex", rich_help_panel="Advanced")
+def import_codex(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Import the detected Codex session without confirmation.",
+    ),
+) -> None:
+    """Import the most recently active Codex conversation into a FatCat session."""
 
-    container = _container()
-    _ensure_project(container)
-    pending = container.inbox_repo.list_pending()
-    if not pending:
-        console.print(mascot.inbox_empty())
+    settings = Settings.from_env()
+    container = build_container(settings)
+    project = _ensure_project(container, prompt_name=True)
+    document = build_codex_session_source().latest()
+    if document is None:
+        console.print(mascot.info("No local Codex session found."))
+        raise typer.Exit(code=0)
+    if not document.user_messages:
+        console.print(mascot.info("The detected Codex session has no user messages."))
         raise typer.Exit(code=0)
 
-    console.print(mascot.inbox_intro(len(pending)))
-    reviewer = container.review_memory_candidate()
+    session_id = f"codex_{document.id}"
+    existing = container.session_repo.get(session_id)
+    if existing is not None:
+        console.print(
+            mascot.info(
+                f"Codex session already imported: {existing.title or existing.id}."
+            )
+        )
+        raise typer.Exit(code=0)
 
-    def _report(result) -> None:
+    console.print(
+        mascot.info(
+            f"Detected Codex session: {document.title}\n"
+            f"   {len(document.user_messages)} user messages\n"
+            f"   FatCat project: {project.name}"
+        )
+    )
+    if not yes and not typer.confirm("Import this Codex session?", default=True):
+        raise typer.Exit(code=0)
+
+    problem = _llm_preflight(settings)
+    if problem is not None:
+        console.print(mascot.confused(problem))
+        raise typer.Exit(code=2)
+
+    lifecycle = container.session_lifecycle()
+    session = lifecycle.start(
+        source="codex",
+        project_id=container.project_id,
+        source_ref=document.source_ref,
+        title=document.title,
+        session_id=session_id,
+    )
+    combined = "\n\n".join(document.user_messages)
+    try:
+        with console.status(mascot.thinking(), spinner="dots"):
+            result = container.passive_capture().execute(
+                combined,
+                project_id=container.project_id,
+                source="codex",
+                session_id=session.id,
+                source_ref=document.source_ref,
+            )
+    except LLMExtractionError as exc:
+        lifecycle.end(session.id)
+        console.print(mascot.confused(f"The LLM isn't healthy:\n   {exc}"))
+        raise typer.Exit(code=1)
+    lifecycle.end(session.id)
+    console.print(mascot.candidates_found(result.total_candidates))
+    if result.total_candidates:
+        console.print(
+            f"Run [bold]{_invocation(f'review {session.id}')}[/bold] "
+            "to review this session."
+        )
+        if not yes and typer.confirm("Review this session now?", default=True):
+            _review_candidates(container, session_id=session.id)
+
+
+def _prompt_issue_importance(candidate: IssueCandidate) -> str:
+    allowed = ("low", "medium", "high", "core")
+    default = candidate.suggested_importance or "medium"
+    while True:
+        value = typer.prompt(
+            "Importance [low/medium/high/core]",
+            default=default,
+        ).strip().lower()
+        if value in allowed:
+            return value
+        console.print("[yellow]Choose low, medium, high, or core.[/yellow]")
+
+
+def _default_issue_scope(candidate: IssueCandidate) -> Scope:
+    suggested = candidate.suggested_scope
+    if suggested is not None:
+        return suggested
+    if candidate.session_id:
+        return Scope(level="session", reference_id=candidate.session_id)
+    return Scope(level="global")
+
+
+def _prompt_issue_scope(candidate: IssueCandidate) -> Scope:
+    suggested = _default_issue_scope(candidate)
+
+    allowed = ("session", "project", "domain", "global")
+    while True:
+        level = typer.prompt(
+            "Scope [session/project/domain/global]",
+            default=suggested.level,
+        ).strip().lower()
+        if level in allowed:
+            break
+        console.print("[yellow]Choose session, project, domain, or global.[/yellow]")
+
+    if level == "global":
+        return Scope(level="global")
+
+    default_reference = (
+        suggested.reference_id
+        if suggested.level == level
+        else (
+            candidate.session_id
+            if level == "session"
+            else candidate.observed_in_project_id if level == "project" else None
+        )
+    )
+    while True:
+        reference = typer.prompt(
+            f"{level.title()} reference",
+            default=default_reference or "",
+        ).strip()
+        if reference:
+            return Scope(level=level, reference_id=reference)
+        console.print("[yellow]A non-global scope needs a reference.[/yellow]")
+
+
+def _prompt_memory_scope(candidate) -> str:
+    """Let advanced users correct applicability without exposing it by default."""
+
+    suggested = candidate.scope_ref
+    allowed = ("session", "project", "domain", "global")
+    while True:
+        level = typer.prompt(
+            "Applies to [session/project/domain/global]",
+            default=suggested.level,
+        ).strip().lower()
+        if level in allowed:
+            break
+        console.print("[yellow]Choose session, project, domain, or global.[/yellow]")
+    if level == "global":
+        return "global"
+    default_reference = (
+        suggested.reference_id
+        if suggested.level == level
+        else candidate.session_id if level == "session"
+        else candidate.project_id if level == "project"
+        else None
+    )
+    while True:
+        reference = typer.prompt(
+            f"{level.title()} name",
+            default=default_reference or "",
+        ).strip()
+        if reference:
+            return Scope(level=level, reference_id=reference).to_legacy()
+        console.print("[yellow]This scope needs a name.[/yellow]")
+
+
+def _select_merge_target(container: Container):
+    issues = container.issue_repo.list_all()
+    if not issues:
+        console.print("[yellow]There are no learning issues to merge into.[/yellow]")
+        return None
+    console.print(render_issue_table(issues, numbered=True))
+    selection = typer.prompt("Merge into issue number").strip()
+    try:
+        return issues[int(selection) - 1]
+    except (ValueError, IndexError):
+        console.print("[yellow]Invalid issue number; candidate left unchanged.[/yellow]")
+        return None
+
+
+def _print_memory_review_actions() -> None:
+    console.print("  [bold]Enter[/bold]  Keep this")
+    console.print("  [bold]e[/bold]      Edit it first")
+    console.print("  [bold]n[/bold]      No, forget it")
+    console.print("  [bold]d[/bold]      Change details such as where it applies")
+    console.print("  [bold]q[/bold]      Finish later")
+
+
+def _print_issue_review_actions() -> None:
+    console.print("  [bold]Enter[/bold]  Yes, watch for an answer")
+    console.print("  [bold]e[/bold]      Edit the question first")
+    console.print("  [bold]n[/bold]      No, this is not useful")
+    console.print("  [bold]l[/bold]      Ask me later")
+    console.print("  [bold]d[/bold]      Change advanced details")
+    console.print("  [bold]q[/bold]      Finish later")
+
+
+def _review_candidates(
+    container: Container,
+    *,
+    include_deferred: bool = False,
+    session_id: str | None = None,
+) -> bool:
+    """Run the shared interactive review loop."""
+
+    memory_pending = container.inbox_repo.list_pending(session_id)
+    issue_pending = container.issue_candidate_repo.list_pending(session_id)
+    if include_deferred:
+        issue_pending += container.issue_candidate_repo.list_deferred(session_id)
+
+    if not memory_pending and not issue_pending:
+        if session_id is not None:
+            session = container.session_repo.get(session_id)
+            if session is not None and session.status == "ended":
+                container.review_session().complete(session_id)
+                console.print(mascot.info("Session review complete."))
+        else:
+            console.print(mascot.inbox_empty())
+        return True
+
+    memory_reviewer = container.review_memory_candidate()
+
+    def _report_memory(result) -> None:
         if result.created:
             console.print(mascot.saved(result.memory_item))
         else:
             console.print(mascot.already_known(result.memory_item))
 
-    for index, candidate in enumerate(pending, start=1):
+    if memory_pending:
+        console.print(mascot.memory_inbox_intro(len(memory_pending)))
+    for index, candidate in enumerate(memory_pending, start=1):
         console.print(mascot.candidate_intro(candidate))
         console.print(render_candidate(index, candidate))
-        choice = typer.prompt("Decision [s/e/p/d/q]", default="s").strip().lower()
+        _print_memory_review_actions()
+        choice = typer.prompt("Choose", default="keep").strip().lower()
 
         if choice in ("q", "quit"):
             console.print(
-                f"Pausing review. Run [bold]{_invocation('inbox')}[/bold] to continue."
+                f"Saved for later. Run [bold]{_invocation('review')}[/bold] to continue."
             )
-            break
-        if choice in ("d", "discard"):
-            reviewer.execute(candidate.id, "discard")
+            return False
+        if choice in ("n", "no", "discard", "reject", "x"):
+            memory_reviewer.execute(candidate.id, "discard")
             console.print(mascot.discarded())
             continue
         if choice in ("e", "edit"):
             edited = typer.prompt("Edit content", default=candidate.content)
-            result = reviewer.execute(candidate.id, "edit", edited_content=edited)
-            _report(result)
+            result = memory_reviewer.execute(
+                candidate.id,
+                "edit",
+                edited_content=edited,
+            )
+            _report_memory(result)
+            continue
+        if choice in ("d", "details"):
+            console.print(f"  Type: {candidate.memory_type}")
+            console.print(f"  Suggested scope: {candidate.suggested_scope}")
+            console.print(f"  Confidence: {candidate.confidence:.2f}")
+            selected_scope = _prompt_memory_scope(candidate)
+            _report_memory(
+                memory_reviewer.execute(
+                    candidate.id,
+                    "save",
+                    scope=selected_scope,
+                )
+            )
             continue
         if choice in ("p", "project"):
-            result = reviewer.execute(
-                candidate.id, "project_only", project_id=container.project_id
+            result = memory_reviewer.execute(
+                candidate.id,
+                "project_only",
+                project_id=container.project_id,
             )
-            _report(result)
+            _report_memory(result)
             continue
-        # Default: save
-        result = reviewer.execute(candidate.id, "save")
-        _report(result)
-    else:
-        console.print(mascot.review_done())
+        _report_memory(memory_reviewer.execute(candidate.id, "save"))
+
+    if issue_pending:
+        console.print(mascot.issue_inbox_intro(len(issue_pending)))
+    issue_reviewer = container.review_issue_candidate()
+    for index, candidate in enumerate(issue_pending, start=1):
+        console.print(render_issue_candidate(index, candidate))
+        _print_issue_review_actions()
+        choice = typer.prompt("Choose", default="watch").strip().lower()
+
+        if choice in ("q", "quit"):
+            console.print(
+                f"Saved for later. Run [bold]{_invocation('review')}[/bold] to continue."
+            )
+            return False
+        if choice in ("n", "no", "r", "reject"):
+            issue_reviewer.execute(candidate.id, "reject")
+            console.print(mascot.discarded())
+            continue
+        if choice in ("l", "later", "defer"):
+            issue_reviewer.execute(candidate.id, "defer")
+            console.print(mascot.info("Put aside for later."))
+            continue
+        if choice in ("m", "merge"):
+            target = _select_merge_target(container)
+            if target is None:
+                continue
+            result = issue_reviewer.execute(
+                candidate.id,
+                "merge",
+                merge_target_id=target.id,
+            )
+            console.print(
+                mascot.happy(f"Merged into learning issue: {result.issue.question}")
+            )
+            continue
+
+        edited_title = None
+        edited_description = None
+        decision = "confirm"
+        if choice in ("e", "edit"):
+            decision = "edit"
+            edited_title = typer.prompt("Edit question", default=candidate.question)
+            edited_description = typer.prompt(
+                "Edit learning goal",
+                default=candidate.learning_goal,
+            )
+        if choice in ("d", "details"):
+            console.print(
+                "  Expected knowledge: "
+                + (", ".join(candidate.target_memory_types) or "unspecified")
+            )
+            console.print(f"  Confidence: {candidate.confidence:.2f}")
+            importance = _prompt_issue_importance(candidate)
+            scope = _prompt_issue_scope(candidate)
+        else:
+            importance = candidate.suggested_importance or "medium"
+            scope = _default_issue_scope(candidate)
+        result = issue_reviewer.execute(
+            candidate.id,
+            decision,
+            scope=scope,
+            importance=importance,
+            edited_title=edited_title,
+            edited_description=edited_description,
+        )
+        console.print(
+            mascot.happy(
+                f"Confirmed learning issue: {result.issue.question} "
+                f"({result.issue.importance}, {result.issue.scope.to_legacy()})"
+            )
+        )
+
+    console.print(mascot.review_done())
+    if session_id is not None:
+        container.review_session().complete(session_id)
+        console.print(mascot.info("Session review complete."))
+    return True
 
 
-def _distill_new_turns(container: Container, source, project_id: str | None) -> int:
+@app.command(rich_help_panel="Advanced")
+def inbox(
+    include_deferred: bool = typer.Option(
+        False,
+        "--deferred",
+        help="Include issue candidates previously put aside for later.",
+    ),
+) -> None:
+    """Review pending memory and learning-issue proposals."""
+
+    container = _container()
+    _ensure_project(container)
+    _review_candidates(container, include_deferred=include_deferred)
+
+
+@app.command(rich_help_panel="Everyday")
+def review(
+    session_id: str = typer.Argument(
+        None,
+        help="Session id. Defaults to the latest unreviewed project session.",
+    ),
+    include_deferred: bool = typer.Option(
+        False,
+        "--deferred",
+        help="Include issue candidates put aside for later.",
+    ),
+) -> None:
+    """Review what FatCat learned and what it is still unsure about."""
+
+    container = _container()
+    _ensure_project(container)
+    session = (
+        container.session_repo.get(session_id)
+        if session_id
+        else container.session_lifecycle().latest_unreviewed(container.project_id)
+    )
+    if session is None:
+        _review_candidates(
+            container,
+            include_deferred=include_deferred,
+        )
+        return
+    console.print(
+        mascot.info(
+            f"Reviewing session: {session.title or session.id} "
+            f"({session.source}, {session.id})"
+        )
+    )
+    _review_candidates(
+        container,
+        include_deferred=include_deferred,
+        session_id=session.id,
+    )
+
+
+def _distill_new_turns(
+    container: Container,
+    source,
+    project_id: str | None,
+    source_type: SourceType = "transcript",
+) -> int:
     """Poll the source once and distill new turns into inbox candidates.
 
     Returns the number of candidates added. Raw input is never stored in this mode.
@@ -591,14 +1140,16 @@ def _distill_new_turns(container: Container, source, project_id: str | None) -> 
         try:
             with console.status(mascot.thinking(), spinner="dots"):
                 result = capture.execute(
-                    turn, project_id=project_id, source="transcript"
+                    turn,
+                    project_id=project_id,
+                    source=source_type,
                 )
         except LLMExtractionError as exc:
             if exc.fatal:
                 raise
             console.print(f"[yellow]Skipped a turn (LLM error): {exc}[/yellow]")
             continue
-        added += len(result.candidates)
+        added += result.total_candidates
     return added
 
 
@@ -636,6 +1187,7 @@ def _start_daemon(
     directory: Path | None,
     interval: float | None,
     project_scoped: bool,
+    source_name: str,
 ) -> None:
     """Spawn a detached background listener and record its pid."""
 
@@ -644,11 +1196,12 @@ def _start_daemon(
         console.print(
             mascot.info(f"Already listening in the background (pid {existing}).")
         )
-        console.print(f"   Stop it with: [bold]{_invocation('listen --stop')}[/bold]")
+        console.print(f"   Stop it with: [bold]{_invocation('stop')}[/bold]")
         return
 
     settings.home.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "-m", "fatcat.adapters.cli.main", "listen"]
+    cmd += ["--source", source_name]
     if directory is not None:
         cmd += ["--dir", str(directory)]
     if interval is not None:
@@ -670,9 +1223,9 @@ def _start_daemon(
 
     console.print(mascot.happy(f"Listening in the background (pid {proc.pid})."))
     console.print(f"   Logs:   {log_file}")
-    console.print(f"   Review: [bold]{_invocation('inbox')}[/bold]")
+    console.print(f"   Review: [bold]{_invocation('review')}[/bold]")
     console.print(f"   Status: [bold]{_invocation('listen --status')}[/bold]")
-    console.print(f"   Stop:   [bold]{_invocation('listen --stop')}[/bold]")
+    console.print(f"   Stop:   [bold]{_invocation('stop')}[/bold]")
 
 
 def _stop_daemon(settings: Settings) -> None:
@@ -701,8 +1254,13 @@ def _status_daemon(settings: Settings) -> None:
     console.print(f"   Logs: {settings.paths.listen_log_file}")
 
 
-@app.command()
+@app.command(rich_help_panel="Advanced")
 def listen(
+    source_name: ListenSource = typer.Option(
+        ListenSource.cursor,
+        "--source",
+        help="Conversation source to watch.",
+    ),
     directory: Path = typer.Option(
         None,
         "--dir",
@@ -728,10 +1286,12 @@ def listen(
         False, "--status", help="Show whether a background listener is running."
     ),
 ) -> None:
-    """Passively listen to chat transcripts and distill them into the inbox.
+    """Passively listen to Cursor or Codex and distill turns into the inbox.
 
     The cat reads only your own messages, keeps just the essence as candidates,
     stores no raw text, and still requires review before anything becomes a memory.
+
+    Codex listening binds to the latest active session when the listener starts.
 
     Use --daemon to run in the background; --status / --stop to manage it.
     """
@@ -748,21 +1308,40 @@ def listen(
     container = build_container(settings)
     _ensure_project(container, prompt_name=project_scoped)
 
+    source_name = source_name.value
+    if source_name == "codex" and directory is not None:
+        console.print("[red]--dir can only be used with --source cursor.[/red]")
+        raise typer.Exit(code=2)
+
     resolved_dir = directory
-    source = build_ingest_source(settings, transcripts_dir=directory)
+    if source_name == "codex":
+        source = build_codex_ingest_source(settings)
+        if source is not None:
+            console.print(mascot.info(f"Watching {source.describe()}."))
+    else:
+        source = build_ingest_source(settings, transcripts_dir=directory)
+        if source is None:
+            auto = _auto_transcripts_dir()
+            if auto is not None:
+                console.print(
+                    mascot.info(
+                        "Found this project's Cursor transcripts automatically."
+                    )
+                )
+                resolved_dir = auto
+                source = build_ingest_source(settings, transcripts_dir=auto)
+
     if source is None:
-        auto = _auto_transcripts_dir()
-        if auto is not None:
+        if source_name == "codex":
             console.print(
-                mascot.info("Found this project's Cursor transcripts automatically.")
+                "[red]No Codex session found.[/red] Start a Codex conversation "
+                "and try again."
             )
-            resolved_dir = auto
-            source = build_ingest_source(settings, transcripts_dir=auto)
-    if source is None:
-        console.print(
-            "[red]No transcript source found.[/red] "
-            "Pass --dir or set FATCAT_TRANSCRIPTS_DIR."
-        )
+        else:
+            console.print(
+                "[red]No Cursor transcript source found.[/red] "
+                "Pass --dir or set FATCAT_TRANSCRIPTS_DIR."
+            )
         raise typer.Exit(code=2)
 
     problem = _llm_preflight(settings)
@@ -771,31 +1350,48 @@ def listen(
         raise typer.Exit(code=2)
 
     if daemon:
-        _start_daemon(settings, resolved_dir, interval, project_scoped)
+        _start_daemon(
+            settings,
+            resolved_dir,
+            interval,
+            project_scoped,
+            source_name,
+        )
         return
 
     project_id = container.project_id if project_scoped else None
     poll_interval = interval or settings.listen_interval
+    source_type: SourceType = "codex" if source_name == "codex" else "transcript"
 
     if once:
         try:
-            added = _distill_new_turns(container, source, project_id)
+            added = _distill_new_turns(
+                container,
+                source,
+                project_id,
+                source_type,
+            )
         except LLMExtractionError as exc:
             console.print(mascot.confused(f"Stopping - the LLM isn't healthy:\n   {exc}"))
             raise typer.Exit(code=1)
         console.print(mascot.candidates_found(added))
         if added:
-            console.print(f"Run [bold]{_invocation('inbox')}[/bold] to review them.")
+            console.print(f"Run [bold]{_invocation('review')}[/bold] to review them.")
         return
 
-    console.print(mascot.listening(source.describe(), _invocation("inbox")))
+    console.print(mascot.listening(source.describe(), _invocation("review")))
     try:
         while True:
-            added = _distill_new_turns(container, source, project_id)
+            added = _distill_new_turns(
+                container,
+                source,
+                project_id,
+                source_type,
+            )
             if added:
                 console.print(
                     f"{mascot.candidates_found(added)}  "
-                    f"(review in another terminal: [bold]{_invocation('inbox')}[/bold])"
+                    f"(review in another terminal: [bold]{_invocation('review')}[/bold])"
                 )
             time.sleep(poll_interval)
     except KeyboardInterrupt:
@@ -852,7 +1448,7 @@ def _describe_storage_paths(paths: list[Path], home: Path) -> str:
     return ", ".join(labels)
 
 
-@app.command()
+@app.command(rich_help_panel="Advanced")
 def reset(
     memories: bool = typer.Option(
         True,
@@ -935,7 +1531,7 @@ def reset(
     console.print(mascot.cleared(cleared, summary))
 
 
-@app.command()
+@app.command(rich_help_panel="Advanced")
 def memories(
     project_scoped: bool = typer.Option(
         False, "--project", "-p", help="Show only the active project's memories."
@@ -952,6 +1548,66 @@ def memories(
         console.print(f"{MascotRenderer().greeting()}\nNo memories yet.")
         raise typer.Exit(code=0)
     console.print(render_memory_table(items))
+
+
+@app.command(rich_help_panel="Advanced")
+def issues(
+    project_scoped: bool = typer.Option(
+        False,
+        "--project",
+        "-p",
+        help="Show only learning issues scoped to the active project.",
+    ),
+) -> None:
+    """List user-confirmed learning questions."""
+
+    container = _container()
+    if project_scoped:
+        items = container.issue_repo.list_by_project(container.project_id)
+    else:
+        items = container.issue_repo.list_all()
+    if not items:
+        console.print(f"{MascotRenderer().greeting()}\nNo learning issues yet.")
+        raise typer.Exit(code=0)
+    console.print(render_issue_table(items))
+
+
+@app.command(rich_help_panel="Everyday")
+def show() -> None:
+    """Show what FatCat currently knows and is still learning about you."""
+
+    container = _container()
+    _ensure_project(container)
+    memories = container.memory_repo.list_all()
+    issues = container.issue_repo.list_all()
+
+    console.print(mascot.greeting())
+    console.print("\n[bold]What I know about how you work[/bold]")
+    if memories:
+        for item in memories:
+            console.print(f"  • {item.content}")
+    else:
+        console.print("  [dim]Nothing confirmed yet.[/dim]")
+
+    console.print("\n[bold]What I am still learning[/bold]")
+    if issues:
+        for item in issues:
+            console.print(f"  • {item.question}")
+            console.print(f"    [dim]{item.learning_goal}[/dim]")
+    else:
+        console.print("  [dim]No open learning questions.[/dim]")
+
+
+@app.command(rich_help_panel="Advanced")
+def sessions() -> None:
+    """List capture sessions for the active project."""
+
+    container = _container()
+    items = container.session_repo.list_by_project(container.project_id)
+    if not items:
+        console.print(mascot.info("No capture sessions yet."))
+        raise typer.Exit(code=0)
+    console.print(render_session_table(items))
 
 
 def run() -> None:

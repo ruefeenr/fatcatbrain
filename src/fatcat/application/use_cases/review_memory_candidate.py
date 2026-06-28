@@ -45,6 +45,7 @@ class ReviewMemoryCandidate:
         *,
         edited_content: str | None = None,
         project_id: str | None = None,
+        scope: str | None = None,
     ) -> ReviewResult:
         candidate = self._inbox_repo.get(candidate_id)
         if candidate is None:
@@ -53,7 +54,7 @@ class ReviewMemoryCandidate:
         memory_item: MemoryItem | None = None
 
         if decision == "discard":
-            self._inbox_repo.mark_reviewed(candidate_id)
+            self._inbox_repo.mark_reviewed(candidate_id, status="rejected")
             return ReviewResult(
                 decision=decision,
                 candidate=candidate,
@@ -76,8 +77,19 @@ class ReviewMemoryCandidate:
                 content=edited_content,
             )
         elif decision in ("save", "edit"):
+            effective_scope = scope or candidate.suggested_scope
+            if effective_scope.startswith("project:"):
+                target_project = effective_scope.split(":", 1)[1]
+            elif effective_scope.startswith("session:"):
+                target_project = candidate.project_id
+            else:
+                # Global and domain knowledge should not be trapped in the
+                # project where it happened to be observed.
+                target_project = None
             memory_item = candidate_to_memory_item(
                 candidate,
+                scope=effective_scope,
+                project_id=target_project,
                 content=edited_content,
             )
         else:  # pragma: no cover - guarded by Literal typing
@@ -87,7 +99,7 @@ class ReviewMemoryCandidate:
             memory_item.content, memory_item.project_id
         )
         if existing is not None:
-            self._inbox_repo.mark_reviewed(candidate_id)
+            self._inbox_repo.mark_reviewed(candidate_id, status="merged")
             return ReviewResult(
                 decision=decision,
                 candidate=candidate,
@@ -96,7 +108,8 @@ class ReviewMemoryCandidate:
             )
 
         self._memory_repo.save(memory_item)
-        self._inbox_repo.mark_reviewed(candidate_id)
+        resolution = "edited" if decision == "edit" else "confirmed"
+        self._inbox_repo.mark_reviewed(candidate_id, status=resolution)
         return ReviewResult(
             decision=decision,
             candidate=candidate,

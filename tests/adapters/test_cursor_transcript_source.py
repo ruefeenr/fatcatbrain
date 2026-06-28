@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fatcat.adapters.ingest import CursorTranscriptSource, read_user_texts
+from fatcat.adapters.ingest import (
+    CursorTranscriptSource,
+    latest_transcript_file,
+    read_user_texts,
+)
 
 
 def _user(text: str) -> str:
@@ -111,3 +115,17 @@ def test_read_user_texts_from_dir_ignores_state(tmp_path: Path):
 
 def test_read_user_texts_missing_path(tmp_path: Path):
     assert read_user_texts(tmp_path / "nope.jsonl") == []
+
+
+def test_latest_transcript_and_directory_import_ignore_subagents(tmp_path: Path):
+    main = tmp_path / "session-1" / "session-1.jsonl"
+    subagent = tmp_path / "session-1" / "subagents" / "sub.jsonl"
+    _write(main, [_user("<user_query>Main</user_query>")])
+    _write(subagent, [_user("<user_query>Subagent</user_query>")])
+    import os
+
+    os.utime(main, (1, 1))
+    os.utime(subagent, (2, 2))
+
+    assert latest_transcript_file(tmp_path) == main
+    assert read_user_texts(tmp_path) == ["Main"]

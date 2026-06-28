@@ -5,10 +5,11 @@ from __future__ import annotations
 import pytest
 
 from fatcat.application.use_cases import CaptureBrainDump
-from fatcat.domain.models import MemoryCandidate
+from fatcat.domain.models import IssueCandidate, MemoryCandidate
 
 from .fakes import (
     InMemoryInboxRepository,
+    InMemoryIssueCandidateRepository,
     InMemoryRawInputRepository,
     StubLLM,
 )
@@ -25,6 +26,16 @@ def _candidate(**overrides) -> MemoryCandidate:
     )
     base.update(overrides)
     return MemoryCandidate(**base)
+
+
+def _issue_candidate(**overrides) -> IssueCandidate:
+    base = dict(
+        title="How should review work?",
+        description="The review workflow is still open.",
+        confidence=0.85,
+    )
+    base.update(overrides)
+    return IssueCandidate(**base)
 
 
 def test_capture_stores_raw_input_and_fills_inbox():
@@ -93,3 +104,50 @@ def test_capture_can_skip_raw_input_storage():
     uc.execute("dump")
     assert raw_repo.items == []
     assert len(inbox.list_pending()) == 1
+
+
+def test_capture_routes_issue_candidates_to_their_own_port():
+    issue_inbox = InMemoryIssueCandidateRepository()
+    llm = StubLLM([_candidate()], [_issue_candidate()])
+    uc = CaptureBrainDump(
+        llm,
+        InMemoryRawInputRepository(),
+        InMemoryInboxRepository(),
+        issue_candidate_repo=issue_inbox,
+    )
+
+    result = uc.execute(
+        "We still need to decide how review works.",
+        project_id="fatcat",
+        session_id="session_1",
+        source_ref="transcript.jsonl",
+    )
+
+    assert len(result.issue_candidates) == 1
+    assert result.total_candidates == 2
+    assert issue_inbox.list_pending()[0].project_id == "fatcat"
+    assert issue_inbox.list_pending()[0].session_id == "session_1"
+    assert llm.calls[0].source_ref == "transcript.jsonl"
+
+
+def test_capture_filters_low_confidence_issue_candidates():
+    issue_inbox = InMemoryIssueCandidateRepository()
+    llm = StubLLM(
+        [],
+        [
+            _issue_candidate(title="strong", confidence=0.9),
+            _issue_candidate(title="weak", confidence=0.2),
+        ],
+    )
+    uc = CaptureBrainDump(
+        llm,
+        InMemoryRawInputRepository(),
+        InMemoryInboxRepository(),
+        issue_candidate_repo=issue_inbox,
+        min_confidence=0.6,
+    )
+
+    result = uc.execute("There are open questions.")
+
+    assert [candidate.title for candidate in result.issue_candidates] == ["strong"]
+    assert [candidate.title for candidate in issue_inbox.list_pending()] == ["strong"]

@@ -34,6 +34,14 @@ class ScopedMemoryRepository:
     ) -> MemoryItem | None:
         return self._target(project_id).find_duplicate(content, project_id)
 
+    def find_by_source_candidate_id(
+        self, candidate_id: str
+    ) -> MemoryItem | None:
+        return (
+            self._project.find_by_source_candidate_id(candidate_id)
+            or self._global.find_by_source_candidate_id(candidate_id)
+        )
+
     def list_all(self) -> list[MemoryItem]:
         """Global memories plus the active project's memories."""
         return self._global.list_all() + self._project.list_all()
