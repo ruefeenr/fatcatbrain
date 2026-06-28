@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from fatcatbrain.application.use_cases import ReviewMemoryCandidate
-from fatcatbrain.domain.models import MemoryCandidate
+from fatcat.application.use_cases import ReviewMemoryCandidate
+from fatcat.domain.models import MemoryCandidate
 
 from .fakes import InMemoryInboxRepository, InMemoryMemoryRepository
 
@@ -85,6 +85,15 @@ def test_review_project_only_without_project_raises():
     uc, _, _ = _setup(cand)
     with pytest.raises(ValueError):
         uc.execute(cand.id, "project_only")
+
+
+def test_review_project_only_assigns_active_project_to_global_candidate():
+    cand = _candidate(project_id=None)
+    uc, _, mem = _setup(cand)
+    result = uc.execute(cand.id, "project_only", project_id="alpha")
+    assert result.created is True
+    assert mem.items[0].project_id == "alpha"
+    assert mem.items[0].scope == "project:alpha"
 
 
 def test_review_unknown_candidate_raises():

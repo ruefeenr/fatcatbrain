@@ -1,5 +1,5 @@
 [project]
-name = "fatcatbrain"
+name = "fatcat"
 version = "0.1.0"
 description = "A playful local context-capture CLI companion (fat cat mascot) for AI project work."
 readme = "README.md"
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fcb = "fatcatbrain.adapters.cli.main:run"
+fcat = "fatcat.adapters.cli.main:run"
 
 [dependency-groups]
 dev = [

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fatcatbrain.application.use_cases import SaveMemoryItem
+from fatcat.application.use_cases import SaveMemoryItem
 
 from .fakes import InMemoryMemoryRepository, InMemoryRawInputRepository
 

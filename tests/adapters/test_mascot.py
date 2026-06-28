@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from fatcatbrain.adapters.cli.mascot import (
+from fatcat.adapters.cli.mascot import (
     FACE_CURIOUS,
     FACE_HAPPY,
     FACE_IDLE,
     FACE_SUSPICIOUS,
     MascotRenderer,
 )
-from fatcatbrain.domain.models import MemoryCandidate, MemoryItem
+from fatcat.domain.models import MemoryCandidate, MemoryItem
 
 
 def _candidate(**overrides) -> MemoryCandidate:

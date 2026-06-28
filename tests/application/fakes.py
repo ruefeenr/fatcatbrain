@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from fatcatbrain.domain.models import (
+from fatcat.domain.models import (
     MemoryCandidate,
     MemoryItem,
     Project,
     RawInput,
 )
-from fatcatbrain.domain.policies import normalize_memory_content
-from fatcatbrain.domain.value_objects import GLOBAL_SCOPE
+from fatcat.domain.policies import normalize_memory_content
+from fatcat.domain.value_objects import GLOBAL_SCOPE
 
 
 class InMemoryMemoryRepository:

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from fatcatbrain.adapters.llm.errors import LLMExtractionError
-from fatcatbrain.adapters.llm.ollama_adapter import OllamaAdapter
-from fatcatbrain.domain.models import Project, RawInput
+from fatcat.adapters.llm.errors import LLMExtractionError
+from fatcat.adapters.llm.ollama_adapter import OllamaAdapter
+from fatcat.domain.models import Project, RawInput
 
 
 class FakeClient:

@@ -25,5 +25,5 @@ htmlcov/
 .idea/
 .vscode/
 
-# fatcatbrain local data (in case someone points FCB_HOME into the repo)
-.fatcatbrain/
+# fatcat local data (in case someone points FATCAT_HOME into the repo)
+.fatcat/

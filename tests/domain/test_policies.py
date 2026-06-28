@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fatcatbrain.domain.models import MemoryCandidate
-from fatcatbrain.domain.policies import (
+from fatcat.domain.models import MemoryCandidate
+from fatcat.domain.policies import (
     PrivacyPolicy,
     candidate_to_memory_item,
     scope_for_project_only,

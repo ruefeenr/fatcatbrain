@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fatcatbrain.adapters.llm import FakeLLMAdapter
-from fatcatbrain.domain.models import Project, RawInput
+from fatcat.adapters.llm import FakeLLMAdapter
+from fatcat.domain.models import Project, RawInput
 
 
 def _raw(content: str) -> RawInput:

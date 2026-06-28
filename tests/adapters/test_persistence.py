@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fatcatbrain.adapters.persistence import (
+from fatcat.adapters.persistence import (
     JsonProjectRepository,
     JsonlInboxRepository,
     JsonlMemoryRepository,
     JsonlRawInputRepository,
     ScopedMemoryRepository,
 )
-from fatcatbrain.adapters.persistence.jsonl import read_jsonl
-from fatcatbrain.domain.models import MemoryCandidate, MemoryItem, Project, RawInput
+from fatcat.adapters.persistence.jsonl import read_jsonl
+from fatcat.domain.models import MemoryCandidate, MemoryItem, Project, RawInput
 
 
 def _candidate(**overrides) -> MemoryCandidate:

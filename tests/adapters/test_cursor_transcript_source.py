@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fatcatbrain.adapters.ingest import CursorTranscriptSource, read_user_texts
+from fatcat.adapters.ingest import CursorTranscriptSource, read_user_texts
 
 
 def _user(text: str) -> str:

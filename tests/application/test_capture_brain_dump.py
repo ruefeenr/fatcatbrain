@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from fatcatbrain.application.use_cases import CaptureBrainDump
-from fatcatbrain.domain.models import MemoryCandidate
+from fatcat.application.use_cases import CaptureBrainDump
+from fatcat.domain.models import MemoryCandidate
 
 from .fakes import (
     InMemoryInboxRepository,

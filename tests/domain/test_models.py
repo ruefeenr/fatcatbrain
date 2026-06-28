@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from fatcatbrain.domain.models import MemoryCandidate, MemoryItem
+from fatcat.domain.models import MemoryCandidate, MemoryItem
 
 
 def _candidate(**overrides) -> MemoryCandidate:
