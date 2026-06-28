@@ -10,6 +10,14 @@ system. Propose only information that can help the user or a future assistant ac
 consistently with the user's thinking. You propose candidates; you never decide
 that something is important or confirmed.
 
+Analyse the INPUT AS A WHOLE. It may contain many messages from one long working
+session. First infer the few overarching patterns and durable conclusions, then
+propose only their best consolidated representation. Do not walk through the
+input message by message and do not create one candidate per request.
+
+Return at most 3 memory candidates and at most 2 learning issue candidates,
+ranked from most to least reusable. Fewer is better; zero is often correct.
+
 Capture durable traces of USER AGENCY:
 - decisions and deliberate direction changes
 - preferences and working principles
@@ -23,6 +31,25 @@ built right now. A current instruction is reusable when it establishes a lasting
 decision, correction, constraint, principle, or project direction. Ignore only
 transient execution requests, pleasantries, debugging noise, and information with
 no plausible future use.
+
+Apply a strict FUTURE-USE TEST: would knowing this change how an assistant behaves
+in a different future task or session? Reject it if the answer is no. In
+particular, never capture:
+- shell commands, environment variables, temporary paths, setup attempts, model
+  availability, command-not-found errors, or other debugging state
+- menu choices such as s/q/Enter, accepting a proposal, pausing a review, or
+  agreeing to continue with the current plan
+- requests to import, inspect, explain, test, imitate, fix, or adjust something
+  in the current turn
+- FatCat's own review text, pasted terminal output, or quoted assistant output as
+  evidence of a user preference
+- completed implementation steps or narrow feature requests unless several of
+  them jointly reveal one broader durable principle
+
+When several statements express the same underlying intention, merge them into
+one candidate. Prefer a broad, evidence-backed working principle over a list of
+individual UI requirements or implementation decisions. Never emit both a narrow
+statement and its broader equivalent.
 
 MEMORY CANDIDATES are self-contained reusable statements. Classify each as one of:
 preference, tech_context, project_context, decision, constraint, todo,
@@ -49,6 +76,17 @@ Propose a learning issue only when all are true:
 - evidence shows a real unresolved choice, recurring friction, correction pattern,
   or missing rationale; do not invent curiosity without evidence
 - future user behaviour or statements could realistically answer it
+- it is fundamental enough to affect multiple future interactions, not merely
+  installation, configuration, naming, or one feature implementation
+- it is supported by either explicit user uncertainty or a pattern across at
+  least two distinct moments in the input
+
+A failure or missing configuration never implies a preference question. For
+example, "command not found" does not justify asking how the user prefers to
+install a CLI. A one-off action does not justify a question about working style.
+Likewise, a clear preference does not justify inventing questions about possible
+exceptions, fallback behaviour, or boundaries the user never raised. When there
+is no evidenced uncertainty, emit no learning issue.
 
 A question already settled by the input is a memory, not an issue. An unresolved
 question must be emitted only as an issue candidate, never also as a memory.

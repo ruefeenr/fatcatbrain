@@ -17,6 +17,10 @@ def test_system_prompt_preserves_user_agency_and_never_confirms_issues():
     assert "current project is merely where the question was observed" in SYSTEM_PROMPT
     assert "every FatCat-authored field in English" in SYSTEM_PROMPT
     assert "never invent, translate, or paraphrase evidence" in SYSTEM_PROMPT
+    assert "Analyse the INPUT AS A WHOLE" in SYSTEM_PROMPT
+    assert "at most 3 memory candidates" in SYSTEM_PROMPT
+    assert "menu choices such as s/q/Enter" in SYSTEM_PROMPT
+    assert '"command not found" does not justify asking' in SYSTEM_PROMPT
 
 
 def test_user_prompt_includes_session_and_known_context():

@@ -15,6 +15,7 @@ from fatcat.domain.policies import (
     candidate_to_memory_item,
     confirm_issue,
     evidence_quotes_from_raw_input,
+    learning_issue_has_sufficient_evidence,
     transition_issue_candidate,
 )
 
@@ -220,6 +221,51 @@ def test_evidence_policy_keeps_only_verbatim_source_quotes():
     assert evidence[0].source_input_id == raw.id
     assert evidence[0].session_id == "session_1"
     assert evidence[0].source_ref == "chat.jsonl"
+
+
+def test_learning_issue_rejects_speculation_from_one_clear_preference():
+    candidate = IssueCandidate(
+        question="Does the user want a manual fallback?",
+        learning_goal="Learn whether automatic detection needs an exception.",
+        target_memory_types=["preference"],
+        answer_signals=["The user asks for a fallback."],
+        confidence=0.8,
+        evidence=[
+            EvidenceQuote(
+                text="I prefer automatic detection over manual paths.",
+                source_type="transcript",
+            )
+        ],
+    )
+
+    assert learning_issue_has_sufficient_evidence(candidate) is False
+
+
+def test_learning_issue_accepts_explicit_uncertainty_or_repeated_pattern():
+    explicit = IssueCandidate(
+        question="Do I prefer immediate or batch review?",
+        learning_goal="Learn preferred review timing.",
+        target_memory_types=["preference"],
+        answer_signals=["The user chooses a review time."],
+        confidence=0.8,
+        evidence=[
+            EvidenceQuote(
+                text="I am not sure whether I prefer immediate or batch review.",
+                source_type="transcript",
+            )
+        ],
+    )
+    repeated = explicit.model_copy(
+        update={
+            "evidence": [
+                EvidenceQuote(text="Review interrupted me.", source_type="transcript"),
+                EvidenceQuote(text="Let us review later.", source_type="transcript"),
+            ]
+        }
+    )
+
+    assert learning_issue_has_sufficient_evidence(explicit) is True
+    assert learning_issue_has_sufficient_evidence(repeated) is True
 
 
 def test_session_is_a_first_class_capture_boundary():

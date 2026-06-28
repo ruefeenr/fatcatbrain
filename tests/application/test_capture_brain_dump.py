@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from fatcat.application.use_cases import CaptureBrainDump
-from fatcat.domain.models import IssueCandidate, MemoryCandidate
+from fatcat.domain.models import EvidenceQuote, IssueCandidate, MemoryCandidate
 
 from .fakes import (
     InMemoryInboxRepository,
@@ -30,8 +30,16 @@ def _candidate(**overrides) -> MemoryCandidate:
 
 def _issue_candidate(**overrides) -> IssueCandidate:
     base = dict(
-        title="How should review work?",
-        description="The review workflow is still open.",
+        question="Does the user prefer batch review?",
+        learning_goal="Learn when review should interrupt the user.",
+        target_memory_types=["preference"],
+        answer_signals=["The user chooses a review moment."],
+        evidence=[
+            EvidenceQuote(
+                text="I am not sure whether I prefer batch review.",
+                source_type="brain_dump",
+            )
+        ],
         confidence=0.85,
     )
     base.update(overrides)
@@ -135,8 +143,8 @@ def test_capture_filters_low_confidence_issue_candidates():
     llm = StubLLM(
         [],
         [
-            _issue_candidate(title="strong", confidence=0.9),
-            _issue_candidate(title="weak", confidence=0.2),
+            _issue_candidate(question="strong", confidence=0.9),
+            _issue_candidate(question="weak", confidence=0.2),
         ],
     )
     uc = CaptureBrainDump(
@@ -151,3 +159,34 @@ def test_capture_filters_low_confidence_issue_candidates():
 
     assert [candidate.title for candidate in result.issue_candidates] == ["strong"]
     assert [candidate.title for candidate in issue_inbox.list_pending()] == ["strong"]
+
+
+def test_capture_enforces_low_noise_session_budget():
+    inbox = InMemoryInboxRepository()
+    issue_inbox = InMemoryIssueCandidateRepository()
+    memories = [
+        _candidate(content=f"Ranked memory {index}")
+        for index in range(5)
+    ]
+    issues = [
+        _issue_candidate(question=f"Ranked question {index}?")
+        for index in range(4)
+    ]
+    uc = CaptureBrainDump(
+        StubLLM(memories, issues),
+        InMemoryRawInputRepository(),
+        inbox,
+        issue_candidate_repo=issue_inbox,
+    )
+
+    result = uc.execute("A long session with many individual requests.")
+
+    assert [item.content for item in result.candidates] == [
+        "Ranked memory 0",
+        "Ranked memory 1",
+        "Ranked memory 2",
+    ]
+    assert [item.question for item in result.issue_candidates] == [
+        "Ranked question 0?",
+        "Ranked question 1?",
+    ]

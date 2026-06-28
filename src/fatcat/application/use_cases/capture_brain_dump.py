@@ -18,6 +18,7 @@ from fatcat.application.ports import (
     RawInputRepository,
 )
 from fatcat.domain.models import IssueCandidate, MemoryCandidate, RawInput
+from fatcat.domain.policies import learning_issue_has_sufficient_evidence
 from fatcat.domain.value_objects import SourceType
 
 
@@ -49,6 +50,8 @@ class CaptureBrainDump:
         issue_repo: IssueRepository | None = None,
         store_raw_input: bool = True,
         min_confidence: float = 0.0,
+        max_memory_candidates: int = 3,
+        max_issue_candidates: int = 2,
     ) -> None:
         self._llm = llm
         self._raw_input_repo = raw_input_repo
@@ -59,6 +62,8 @@ class CaptureBrainDump:
         self._issue_repo = issue_repo
         self._store_raw_input = store_raw_input
         self._min_confidence = min_confidence
+        self._max_memory_candidates = max_memory_candidates
+        self._max_issue_candidates = max_issue_candidates
 
     def execute(
         self,
@@ -125,6 +130,12 @@ class CaptureBrainDump:
             if candidate.session_id is None:
                 candidate.session_id = session_id
 
+        issue_candidates = [
+            candidate
+            for candidate in issue_candidates
+            if learning_issue_has_sufficient_evidence(candidate)
+        ]
+
         # Drop low-confidence noise (useful for passive capture).
         if self._min_confidence > 0.0:
             candidates = [
@@ -133,6 +144,11 @@ class CaptureBrainDump:
             issue_candidates = [
                 c for c in issue_candidates if c.confidence >= self._min_confidence
             ]
+
+        # The LLM is instructed to rank by future value. Enforce the product's
+        # low-noise review budget at the application boundary as well.
+        candidates = candidates[: self._max_memory_candidates]
+        issue_candidates = issue_candidates[: self._max_issue_candidates]
 
         if candidates:
             self._inbox_repo.add_candidates(candidates)

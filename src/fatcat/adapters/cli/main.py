@@ -1132,25 +1132,26 @@ def _distill_new_turns(
     Returns the number of candidates added. Raw input is never stored in this mode.
     """
 
-    capture = container.passive_capture()
-    added = 0
-    for turn in source.poll():
-        if not turn.strip():
-            continue
-        try:
-            with console.status(mascot.thinking(), spinner="dots"):
-                result = capture.execute(
-                    turn,
-                    project_id=project_id,
-                    source=source_type,
-                )
-        except LLMExtractionError as exc:
-            if exc.fatal:
-                raise
-            console.print(f"[yellow]Skipped a turn (LLM error): {exc}[/yellow]")
-            continue
-        added += result.total_candidates
-    return added
+    turns = [turn.strip() for turn in source.poll() if turn.strip()]
+    if not turns:
+        return 0
+
+    # A poll is one observation window. Analyse its turns together so the model
+    # can synthesize patterns instead of producing one candidate per message.
+    combined = "\n\n".join(turns)
+    try:
+        with console.status(mascot.thinking(), spinner="dots"):
+            result = container.passive_capture().execute(
+                combined,
+                project_id=project_id,
+                source=source_type,
+            )
+    except LLMExtractionError as exc:
+        if exc.fatal:
+            raise
+        console.print(f"[yellow]Skipped this observation window: {exc}[/yellow]")
+        return 0
+    return result.total_candidates
 
 
 def _pid_alive(pid: int) -> bool:

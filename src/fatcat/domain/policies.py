@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
@@ -102,6 +103,43 @@ def evidence_quotes_from_raw_input(
             )
         )
     return evidence
+
+
+def learning_issue_has_sufficient_evidence(candidate: IssueCandidate) -> bool:
+    """Reject speculative learning questions at the domain boundary.
+
+    One quote is sufficient only when the user explicitly expresses uncertainty.
+    Otherwise a question needs evidence from at least two distinct moments.
+    """
+
+    texts = list(dict.fromkeys(quote.text.strip() for quote in candidate.evidence))
+    if len(texts) >= 2:
+        return True
+    if not texts:
+        return False
+
+    lowered = texts[0].lower()
+    uncertainty_markers = (
+        "not sure",
+        "unsure",
+        "undecided",
+        "unclear whether",
+        "i wonder whether",
+        "weiß nicht",
+        "weiss nicht",
+        "nicht sicher",
+        "unklar, ob",
+        "unentschlossen",
+        "ich schwanke",
+    )
+    if any(marker in lowered for marker in uncertainty_markers):
+        return True
+
+    # A first-person question such as "Do I prefer X or Y?" is explicit
+    # uncertainty even without an uncertainty adjective.
+    return "?" in lowered and bool(
+        re.search(r"\b(i|me|my|ich|mir|mein(?:e|en|er|es)?)\b", lowered)
+    )
 
 
 def candidate_to_memory_item(
