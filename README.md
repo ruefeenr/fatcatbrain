@@ -1,3 +1,15 @@
+# key idea
+My attemt to capture user creativity when working with llms.
+
+FatCat uses a lightweight form of Issue-Based Information System (IBIS) to turn messy chat logs and brain dumps into a structure of decisions. Instead of only storing facts like “User prefers FastAPI”, it surfaces the underlying questions, candidate answers, and reasons behind those choices.
+
+In IBIS terms, FatCat tracks:
+
+Issues – reusable questions or tensions, e.g. “When should I use FastAPI vs Flask for small APIs?”
+Positions – your emerging answers or preferences, e.g. “I prefer FastAPI for small APIs because of typing and docs.”
+Arguments – the rationale and constraints, e.g. “FastAPI is quick to write, but may be overkill for tiny scripts.”
+This helps FatCat distinguish between settled knowledge (“Project X uses Postgres”) and open learning questions (your decision policies, trade-offs, and working style). Issues can resurface across projects, accumulate evidence, and be refined over time, giving you an explicit, explainable model of how you like to work instead of an opaque user profile. 
+
 # fatcat
 ## Usage
 
