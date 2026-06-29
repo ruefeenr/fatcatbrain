@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
+from .deliberation import DecisionIssue, DecisionIssueCandidate
 from .models import (
     ConversationTurn,
     EvidenceQuote,
@@ -298,6 +299,91 @@ def merge_issue_candidate(
                 dict.fromkeys([*target.source_candidate_ids, candidate.id])
             ),
             "updated_at": datetime.now(timezone.utc),
+        },
+        deep=True,
+    )
+
+
+def transition_decision_issue_candidate(
+    candidate: DecisionIssueCandidate,
+    status: CandidateStatus,
+    *,
+    changed_at: datetime | None = None,
+) -> DecisionIssueCandidate:
+    """Apply a valid curation transition to a decision-issue candidate."""
+
+    allowed = _ISSUE_CANDIDATE_TRANSITIONS.get(candidate.status, set())
+    if status not in allowed:
+        raise ValueError(
+            f"Cannot transition decision issue candidate from {candidate.status!r} "
+            f"to {status!r}."
+        )
+    requires_review = status in ("detected", "candidate", "deferred")
+    return candidate.model_copy(
+        update={
+            "status": status,
+            "requires_user_review": requires_review,
+            "updated_at": changed_at or datetime.now(timezone.utc),
+        },
+        deep=True,
+    )
+
+
+def confirm_decision_issue(
+    candidate: DecisionIssueCandidate,
+    *,
+    scope: Scope,
+    importance: Importance,
+    linked_learning_question_ids: list[str] | None = None,
+) -> DecisionIssue:
+    """Create a confirmed decision issue from an explicit user review decision."""
+
+    if candidate.status not in ("candidate", "deferred", "edited"):
+        raise ValueError(
+            f"Cannot confirm decision issue candidate in status {candidate.status!r}."
+        )
+    return DecisionIssue(
+        question=candidate.question,
+        scope=scope,
+        importance=importance,
+        positions=candidate.positions,
+        criteria=candidate.criteria,
+        arguments=candidate.arguments,
+        evidence=candidate.evidence,
+        keywords=candidate.keywords,
+        linked_learning_question_ids=list(linked_learning_question_ids or []),
+        source_candidate_ids=[candidate.id],
+        session_id=candidate.session_id,
+        observed_in_project_id=candidate.observed_in_project_id,
+    )
+
+
+def adopt_position(
+    issue: DecisionIssue,
+    position_id: str,
+    *,
+    rationale: str | None = None,
+    changed_at: datetime | None = None,
+) -> DecisionIssue:
+    """Adopt one position as the issue's decision and mark the others rejected."""
+
+    if not any(position.id == position_id for position in issue.positions):
+        raise ValueError(f"Unknown position id {position_id!r} for this issue.")
+    updated_positions = [
+        position.model_copy(
+            update={
+                "status": "adopted" if position.id == position_id else "rejected"
+            }
+        )
+        for position in issue.positions
+    ]
+    return issue.model_copy(
+        update={
+            "positions": updated_positions,
+            "adopted_position_id": position_id,
+            "status": "adopted",
+            "rationale": rationale if rationale is not None else issue.rationale,
+            "updated_at": changed_at or datetime.now(timezone.utc),
         },
         deep=True,
     )

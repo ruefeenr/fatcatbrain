@@ -15,6 +15,7 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from .value_objects import (
     CandidateStatus,
+    HypothesisStatus,
     Importance,
     IssueStatus,
     LearningMemoryType,
@@ -209,7 +210,24 @@ class MemoryItem(BaseModel):
         return Scope.from_legacy(self.scope, project_id=self.project_id)
 
 
-class IssueCandidate(BaseModel):
+class Hypothesis(BaseModel):
+    """A tentative answer to a learning question, tested against user evidence.
+
+    Hypotheses make a learning question's deliberation explicit: instead of one
+    flat question, FatCat can track several candidate answers and the evidence
+    that supports or refutes each over time.
+    """
+
+    id: str = Field(default_factory=lambda: _new_id("hyp"))
+    statement: str = Field(min_length=1)
+    status: HypothesisStatus = "open"
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    evidence: list[EvidenceQuote] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class LearningQuestionCandidate(BaseModel):
     """A proposed learning question about the user, awaiting curation.
 
     The project is where the question was observed; ``suggested_scope`` describes
@@ -229,6 +247,7 @@ class IssueCandidate(BaseModel):
     )
     target_memory_types: list[LearningMemoryType] = Field(default_factory=list)
     answer_signals: list[str] = Field(default_factory=list)
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
     evidence: list[EvidenceQuote] = Field(default_factory=list)
     linked_memory_candidate_ids: list[str] = Field(default_factory=list)
     linked_memory_types: list[MemoryType] = Field(default_factory=list)
@@ -266,7 +285,7 @@ class IssueCandidate(BaseModel):
         return self.observed_in_project_id
 
 
-class Issue(BaseModel):
+class LearningQuestion(BaseModel):
     """A user-confirmed learning question being observed over time."""
 
     schema_version: int = 3
@@ -282,6 +301,7 @@ class Issue(BaseModel):
     )
     target_memory_types: list[LearningMemoryType] = Field(default_factory=list)
     answer_signals: list[str] = Field(default_factory=list)
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
     status: IssueStatus = "observing"
     scope: Scope
     importance: Importance
@@ -314,6 +334,13 @@ class Issue(BaseModel):
         """Compatibility name; applicability is represented by ``scope``."""
 
         return self.observed_in_project_id
+
+
+# Backward-compatible names. ``Issue`` was renamed to ``LearningQuestion`` to
+# distinguish FatCat's meta question about the user from an IBIS ``DecisionIssue``
+# (see fatcat.domain.deliberation). Stored ``item_type`` values are unchanged.
+Issue = LearningQuestion
+IssueCandidate = LearningQuestionCandidate
 
 
 class Session(BaseModel):

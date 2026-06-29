@@ -101,7 +101,31 @@ IssueStatus = Literal[
     "resolved",
     "archived",
 ]
-"""Lifecycle of a confirmed issue."""
+"""Lifecycle of a confirmed learning question (formerly ``Issue``)."""
+
+HypothesisStatus = Literal["open", "supported", "refuted", "confirmed"]
+"""Lifecycle of a tentative answer to a learning question."""
+
+DecisionStatus = Literal[
+    "open",
+    "exploring",
+    "tentative",
+    "adopted",
+    "superseded",
+]
+"""Lifecycle of an IBIS decision issue the user deliberated."""
+
+PositionStatus = Literal[
+    "proposed",
+    "tentative",
+    "adopted",
+    "rejected",
+    "superseded",
+]
+"""Lifecycle of a candidate answer (position) to a decision issue."""
+
+ArgumentStance = Literal["supports", "opposes"]
+"""Whether an argument supports or opposes a position."""
 
 SessionStatus = Literal["active", "ended", "reviewed"]
 """Lifecycle of a capture session."""
