@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from fatcat.domain.discourse import Segment, segments_from_turn, whole_turn_segment
+import pydantic
+
+from fatcat.domain.discourse import (
+    DialogueActAnnotation,
+    DiscourseRelation,
+    Segment,
+    segments_from_turn,
+    whole_turn_segment,
+)
 from fatcat.domain.models import ConversationTurn
 
 
@@ -56,3 +64,53 @@ def test_whole_turn_segment_covers_the_turn():
 def test_segment_span_requires_both_bounds():
     with pytest.raises(ValueError):
         Segment(turn_id="s1:1", role="user", text="hi", start=0)
+
+
+def test_dialogue_act_annotation_is_multi_label_and_deduped():
+    annotation = DialogueActAnnotation(
+        segment_id="seg_1",
+        acts=["inform", "prefer", "inform"],
+        confidence=0.7,
+    )
+    assert annotation.acts == ["inform", "prefer"]
+
+
+def test_dialogue_act_annotation_requires_at_least_one_act():
+    with pytest.raises(pydantic.ValidationError):
+        DialogueActAnnotation(segment_id="seg_1", acts=[])
+
+
+def test_dialogue_act_rejects_unknown_label():
+    with pytest.raises(pydantic.ValidationError):
+        DialogueActAnnotation(segment_id="seg_1", acts=["smalltalk"])
+
+
+def test_discourse_relation_role_is_independent_of_relation_type():
+    # A "reason" can be rejected rather than support a position.
+    relation = DiscourseRelation(
+        source_segment_id="seg_1",
+        target_segment_id="seg_2",
+        relation_type="reason",
+        argumentative_role="con",
+        confidence=0.6,
+    )
+    assert relation.relation_type == "reason"
+    assert relation.argumentative_role == "con"
+
+
+def test_discourse_relation_defaults_role_to_none():
+    relation = DiscourseRelation(
+        source_segment_id="seg_1",
+        target_segment_id="seg_2",
+        relation_type="elaboration",
+    )
+    assert relation.argumentative_role == "none"
+
+
+def test_discourse_relation_requires_distinct_segments():
+    with pytest.raises(pydantic.ValidationError):
+        DiscourseRelation(
+            source_segment_id="seg_1",
+            target_segment_id="seg_1",
+            relation_type="reason",
+        )

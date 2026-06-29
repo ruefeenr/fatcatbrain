@@ -19,9 +19,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .models import ConversationTurn
+from .value_objects import ArgumentativeRole, DialogueAct, DiscourseRelationType
 
 
 def _utcnow() -> datetime:
@@ -109,3 +110,49 @@ def whole_turn_segment(
         end=len(turn.content),
         order=0,
     )
+
+
+class DialogueActAnnotation(BaseModel):
+    """Multi-label communicative-function annotation for one segment.
+
+    A non-authoritative observation: a single segment can be, for example, an
+    ``inform`` and a ``prefer`` at once. The labels never decide on their own
+    what to store; they are inputs to a separate strength estimation.
+    """
+
+    id: str = Field(default_factory=lambda: _new_id("act"))
+    segment_id: str
+    acts: list[DialogueAct] = Field(min_length=1)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    @field_validator("acts")
+    @classmethod
+    def dedupe_acts(cls, value: list[DialogueAct]) -> list[DialogueAct]:
+        deduped = list(dict.fromkeys(value))
+        if not deduped:
+            raise ValueError("A dialogue-act annotation needs at least one act.")
+        return deduped
+
+
+class DiscourseRelation(BaseModel):
+    """A local relation between two segments, with an independent argument role.
+
+    The relation type (e.g. ``reason``) describes coherence; the argumentative
+    role (pro/con/none) is stored separately because a reason can be cited,
+    rejected, or merely mentioned without being a pro argument.
+    """
+
+    id: str = Field(default_factory=lambda: _new_id("rel"))
+    source_segment_id: str
+    target_segment_id: str
+    relation_type: DiscourseRelationType
+    argumentative_role: ArgumentativeRole = "none"
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    @model_validator(mode="after")
+    def validate_distinct_segments(self) -> "DiscourseRelation":
+        if self.source_segment_id == self.target_segment_id:
+            raise ValueError("A discourse relation must link two distinct segments.")
+        return self

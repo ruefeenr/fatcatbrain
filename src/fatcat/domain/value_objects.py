@@ -127,6 +127,37 @@ PositionStatus = Literal[
 ArgumentStance = Literal["supports", "opposes"]
 """Whether an argument supports or opposes a position."""
 
+DialogueAct = Literal[
+    "ask",
+    "request",
+    "inform",
+    "commit",
+    "prefer",
+    "agree",
+    "reject",
+    "uncertain",
+]
+"""Communicative function of a segment.
+
+Multi-label and non-authoritative: one segment may carry several acts. Acts are
+never direct storage rules; interpretation strength is computed separately from
+explicitness, repetition, confirmation, stability, scope, and certainty.
+"""
+
+DiscourseRelationType = Literal[
+    "reason",
+    "contrast",
+    "condition",
+    "consequence",
+    "elaboration",
+    "correction",
+]
+"""A small set of local relations between segments (not full RST trees)."""
+
+ArgumentativeRole = Literal["pro", "con", "none"]
+"""Whether a relation is used argumentatively. A reason may merely be quoted or
+rejected, so the argumentative role is stored independently of the relation."""
+
 SessionStatus = Literal["active", "ended", "reviewed"]
 """Lifecycle of a capture session."""
 
