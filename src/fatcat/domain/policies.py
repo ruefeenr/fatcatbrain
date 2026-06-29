@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from .models import (
+    ConversationTurn,
     EvidenceQuote,
     Issue,
     IssueCandidate,
@@ -80,11 +81,33 @@ def transition_issue_candidate(
     )
 
 
+def _locate_turn(raw_input: RawInput, text: str) -> ConversationTurn | None:
+    """Find the turn a verbatim quote came from, preferring a user turn.
+
+    The same text could appear in both a user and an assistant turn (the
+    assistant echoing the user). When it does, the user turn is credited so a
+    legitimate user quote is never misattributed to the assistant.
+    """
+
+    fallback: ConversationTurn | None = None
+    for turn in raw_input.turns:
+        if text in turn.content:
+            if turn.role == "user":
+                return turn
+            if fallback is None:
+                fallback = turn
+    return fallback
+
+
 def evidence_quotes_from_raw_input(
     raw_input: RawInput,
     quotes: list[str],
 ) -> list[EvidenceQuote]:
-    """Keep only deduplicated, verbatim excerpts present in the source input."""
+    """Keep only deduplicated, verbatim excerpts present in the source input.
+
+    When the raw input carries structured ``turns``, each quote is annotated
+    with the originating ``turn_id`` and ``role`` for downstream provenance.
+    """
 
     evidence: list[EvidenceQuote] = []
     seen: set[str] = set()
@@ -93,6 +116,7 @@ def evidence_quotes_from_raw_input(
         if not text or text in seen or text not in raw_input.content:
             continue
         seen.add(text)
+        turn = _locate_turn(raw_input, text)
         evidence.append(
             EvidenceQuote(
                 text=text,
@@ -100,9 +124,23 @@ def evidence_quotes_from_raw_input(
                 source_input_id=raw_input.id,
                 source_ref=raw_input.source_ref,
                 session_id=raw_input.session_id,
+                turn_id=turn.id if turn is not None else None,
+                role=turn.role if turn is not None else None,
             )
         )
     return evidence
+
+
+def drop_non_user_evidence(quotes: list[EvidenceQuote]) -> list[EvidenceQuote]:
+    """Keep only user-authored evidence for user memories and learning issues.
+
+    A FatCat memory or issue is a claim about the *user*. Assistant or system
+    text must never be cited as evidence of the user's agency. Quotes whose role
+    is unknown (legacy flat inputs without structured turns) are kept unchanged,
+    so this rule only tightens behaviour where role information is available.
+    """
+
+    return [quote for quote in quotes if quote.role in (None, "user")]
 
 
 def learning_issue_has_sufficient_evidence(candidate: IssueCandidate) -> bool:

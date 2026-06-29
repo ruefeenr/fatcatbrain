@@ -245,6 +245,21 @@ def _write_config(settings: Settings, *, llm: str, ollama_model: str) -> None:
     config_file.write_text(json.dumps(existing, indent=2), encoding="utf-8")
 
 
+def _preferred_model_index(models: list[str]) -> int:
+    """Return the 1-based index of the most preferred installed model.
+
+    Qwen3 is the current default because it extracts candidates roughly three
+    times faster than gpt-oss with comparable quality. gpt-oss remains the
+    fallback preference before falling back to the first installed model.
+    """
+
+    for marker in ("qwen3", "gpt-oss"):
+        for index, name in enumerate(models, start=1):
+            if marker in name:
+                return index
+    return 1
+
+
 def _choose_ollama_model(settings: Settings) -> str:
     """Interactively pick a local Ollama model, guiding install/pull if needed."""
 
@@ -256,25 +271,23 @@ def _choose_ollama_model(settings: Settings) -> str:
         console.print(mascot.confused("I can't reach Ollama right now."))
         console.print("   1) Install:  brew install ollama")
         console.print("   2) Start it: ollama serve")
-        console.print("   3) Pull a model:  ollama pull gpt-oss:20b   (or qwen2.5)")
+        console.print("   3) Pull a model:  ollama pull qwen3:8b   (or gpt-oss:20b)")
         console.print(f"   Then re-run [bold]{_invocation('init')}[/bold].")
         return typer.prompt(
             "Model name to use once Ollama is ready",
-            default=settings.ollama_model or "gpt-oss:20b",
+            default=settings.ollama_model or "qwen3:8b",
         ).strip()
 
     if not status.models:
         console.print(mascot.info("Ollama is running, but has no models yet."))
-        console.print("   Pull one, e.g.:  ollama pull gpt-oss:20b   (or qwen2.5)")
+        console.print("   Pull one, e.g.:  ollama pull qwen3:8b   (or gpt-oss:20b)")
         return typer.prompt(
-            "Model name to use once pulled", default="gpt-oss:20b"
+            "Model name to use once pulled", default="qwen3:8b"
         ).strip()
 
     console.print(mascot.happy("Ollama is ready. Pick a model:"))
-    default_index = 1
+    default_index = _preferred_model_index(status.models)
     for i, name in enumerate(status.models, start=1):
-        if "gpt-oss" in name and default_index == 1:
-            default_index = i
         console.print(f"   {i}) {name}", markup=False)
 
     selection = typer.prompt("Choose a number", default=str(default_index)).strip()

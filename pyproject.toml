@@ -11,11 +11,12 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "pydantic>=2.7",
-    "ollama>=0.3",
+    "ollama>=0.6.2",
 ]
 
 [project.scripts]
 fcat = "fatcat.adapters.cli.main:run"
+fcat-benchmark = "fatcat_benchmarks.cli:run"
 
 [dependency-groups]
 dev = [
@@ -25,6 +26,11 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.11.24,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Ship both top-level packages; the default only packages the project-named
+# module (``fatcat``), which would drop the ``fcat-benchmark`` entry point.
+module-name = ["fatcat", "fatcat_benchmarks"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

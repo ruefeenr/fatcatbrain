@@ -147,6 +147,22 @@ def test_choose_ollama_model_defaults_to_gpt_oss(monkeypatch):
     assert cli_main._choose_ollama_model(settings) == "gpt-oss:20b"
 
 
+def test_choose_ollama_model_prefers_qwen3(monkeypatch):
+    from fatcat.adapters.llm import ollama_info
+
+    monkeypatch.setattr(
+        ollama_info,
+        "probe_ollama",
+        lambda host=None: ollama_info.OllamaStatus(
+            reachable=True, models=["llama3.1", "gpt-oss:20b", "qwen3:8b"]
+        ),
+    )
+    # Empty answer -> qwen3 is now the preferred default over gpt-oss.
+    monkeypatch.setattr(cli_main.typer, "prompt", lambda *a, **k: k.get("default"))
+    settings = cli_main.Settings.from_env({"FATCAT_HOME": "/tmp/fcat_x"})
+    assert cli_main._choose_ollama_model(settings) == "qwen3:8b"
+
+
 def test_choose_ollama_model_when_unreachable_uses_prompted_name(monkeypatch):
     from fatcat.adapters.llm import ollama_info
 

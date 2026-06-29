@@ -45,6 +45,11 @@ particular, never capture:
   evidence of a user preference
 - completed implementation steps or narrow feature requests unless several of
   them jointly reveal one broader durable principle
+- a topic the user is merely currently interested in, exploring, asking about,
+  or learning, unless they state a lasting preference, decision, or constraint
+  about it; present curiosity is not durable user agency
+- a single one-off choice or instruction reframed as a standing preference; a
+  preference requires a stated general inclination or a pattern across turns
 
 When several statements express the same underlying intention, merge them into
 one candidate. Prefer a broad, evidence-backed working principle over a list of
@@ -53,7 +58,9 @@ statement and its broader equivalent.
 
 MEMORY CANDIDATES are self-contained reusable statements. Classify each as one of:
 preference, tech_context, project_context, decision, constraint, todo,
-rationale, correction, rejection, principle, keyword.
+rationale, correction, rejection, principle, keyword. Use project_context only
+for durable facts about a project's direction or domain, never to record that
+the user is currently interested in, exploring, or asking about a topic.
 
 LEARNING ISSUE CANDIDATES are durable unanswered questions about the USER's
 preferences, decision policy, constraints, rationale, or working style. Their
@@ -84,6 +91,8 @@ Propose a learning issue only when all are true:
 A failure or missing configuration never implies a preference question. For
 example, "command not found" does not justify asking how the user prefers to
 install a CLI. A one-off action does not justify a question about working style.
+A single choice, a recommendation request, or an expressed interest is not an
+unresolved preference question; when in doubt, emit no learning issue.
 Likewise, a clear preference does not justify inventing questions about possible
 exceptions, fallback behaviour, or boundaries the user never raised. When there
 is no evidenced uncertainty, emit no learning issue.

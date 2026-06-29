@@ -9,7 +9,7 @@ import pytest
 
 from fatcat.adapters.llm.errors import LLMExtractionError
 from fatcat.adapters.llm.ollama_adapter import OllamaAdapter
-from fatcat.domain.models import Project, RawInput
+from fatcat.domain.models import ConversationTurn, Project, RawInput
 
 
 class FakeClient:
@@ -62,6 +62,22 @@ def test_ollama_parses_valid_json():
     assert candidates[0].memory_type == "preference"
     assert candidates[0].source_input_id == raw.id
     assert candidates[0].confidence == 0.9
+
+
+def test_ollama_requests_schema_constrained_non_thinking_output():
+    client = FakeClient('{"memory_candidates": [], "issue_candidates": []}')
+    adapter = OllamaAdapter(client=client)
+
+    adapter.extract_candidates(_raw())
+
+    assert client.last_kwargs is not None
+    assert client.last_kwargs["think"] is False
+    schema = client.last_kwargs["format"]
+    memory_schema = schema["$defs"]["LLMMemoryCandidateOut"]
+    allowed_types = memory_schema["properties"]["memory_type"]["enum"]
+    assert "preference" in allowed_types
+    assert "interest" not in allowed_types
+    assert schema["properties"]["memory_candidates"]["type"] == "array"
 
 
 def test_ollama_sets_project_id_and_scope():
@@ -156,6 +172,97 @@ def test_ollama_extracts_memory_and_issue_candidates_with_verified_evidence():
     assert issue.session_id == "session_1"
     assert issue.observed_in_project_id == "fatcat"
     assert issue.target_memory_types == ["preference", "principle"]
+
+
+def test_ollama_drops_assistant_evidence_and_annotates_user_turns():
+    user_quote = "I prefer explicit configuration over hidden defaults."
+    assistant_quote = "Explicit configuration is indeed more predictable."
+    payload = json.dumps(
+        {
+            "memory_candidates": [
+                {
+                    "content": "The user prefers explicit configuration.",
+                    "memory_type": "preference",
+                    "suggested_scope": "global",
+                    "confidence": 0.9,
+                    "sensitivity": "low",
+                    "reason": "stated directly",
+                    "evidence": [user_quote, assistant_quote],
+                }
+            ]
+        }
+    )
+    raw = RawInput(
+        content=f"{user_quote}\n\n{assistant_quote}",
+        source="transcript",
+        session_id="session_1",
+        turns=[
+            ConversationTurn(id="s1:1", role="user", content=user_quote),
+            ConversationTurn(id="s1:2", role="assistant", content=assistant_quote),
+        ],
+    )
+    adapter = OllamaAdapter(client=FakeClient(payload))
+
+    candidates = adapter.extract_memory_candidates(raw)
+
+    evidence = candidates[0].evidence
+    assert [quote.text for quote in evidence] == [user_quote]
+    assert evidence[0].turn_id == "s1:1"
+    assert evidence[0].role == "user"
+
+
+def test_ollama_drops_memory_grounded_only_in_assistant_text():
+    user_quote = "What is the best way to structure a CLI?"
+    assistant_quote = "A layered architecture keeps CLIs maintainable."
+    payload = json.dumps(
+        {
+            "memory_candidates": [
+                {
+                    "content": "The user prefers layered architecture for CLIs.",
+                    "memory_type": "preference",
+                    "suggested_scope": "global",
+                    "confidence": 0.9,
+                    "evidence": [assistant_quote],
+                }
+            ]
+        }
+    )
+    raw = RawInput(
+        content=f"{user_quote}\n\n{assistant_quote}",
+        source="transcript",
+        turns=[
+            ConversationTurn(id="s1:1", role="user", content=user_quote),
+            ConversationTurn(id="s1:2", role="assistant", content=assistant_quote),
+        ],
+    )
+    adapter = OllamaAdapter(client=FakeClient(payload))
+
+    assert adapter.extract_memory_candidates(raw) == []
+
+
+def test_ollama_drops_issue_with_insufficient_evidence():
+    quote = "Let's use PostgreSQL for this service."
+    payload = json.dumps(
+        {
+            "issue_candidates": [
+                {
+                    "question": "Does the user prefer relational databases?",
+                    "learning_goal": "Learn the user's database preference.",
+                    "target_memory_types": ["preference"],
+                    "answer_signals": ["A future database choice."],
+                    "confidence": 0.8,
+                    "evidence": [quote],
+                    "reason": "A single database choice.",
+                }
+            ]
+        }
+    )
+    raw = RawInput(content=quote, source="transcript")
+    adapter = OllamaAdapter(client=FakeClient(payload))
+
+    extraction = adapter.extract_candidates(raw)
+
+    assert extraction.issue_candidates == []
 
 
 def test_ollama_empty_candidates():

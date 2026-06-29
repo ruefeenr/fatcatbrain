@@ -27,3 +27,7 @@ htmlcov/
 
 # fatcat local data (in case someone points FATCAT_HOME into the repo)
 .fatcat/
+
+# Locally downloaded benchmark conversations and generated reports
+benchmarks/data/
+benchmarks/reports/

@@ -10,7 +10,10 @@ from fatcat.domain.models import (
     RawInput,
     Scope,
 )
-from fatcat.domain.policies import evidence_quotes_from_raw_input
+from fatcat.domain.policies import (
+    drop_non_user_evidence,
+    evidence_quotes_from_raw_input,
+)
 from fatcat.domain.value_objects import (
     ExtractableMemoryType,
     Importance,
@@ -101,7 +104,9 @@ class LLMMemoryCandidateOut(BaseModel):
             reason=self.reason.strip(),
             user_intention=self.user_intention.strip(),
             reuse_hint=self.reuse_hint.strip(),
-            evidence=evidence_quotes_from_raw_input(raw_input, self.evidence),
+            evidence=drop_non_user_evidence(
+                evidence_quotes_from_raw_input(raw_input, self.evidence)
+            ),
             keywords=_clean_strings(self.keywords),
         )
 
@@ -148,7 +153,9 @@ class LLMIssueCandidateOut(BaseModel):
             learning_goal=self.learning_goal.strip(),
             target_memory_types=list(dict.fromkeys(self.target_memory_types)),
             answer_signals=_clean_strings(self.answer_signals),
-            evidence=evidence_quotes_from_raw_input(raw_input, self.evidence),
+            evidence=drop_non_user_evidence(
+                evidence_quotes_from_raw_input(raw_input, self.evidence)
+            ),
             linked_memory_candidate_ids=linked_ids,
             linked_memory_types=self.linked_memory_types,
             confidence=self.confidence,

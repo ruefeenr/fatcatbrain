@@ -3,7 +3,7 @@
 Environment variables:
     FATCAT_HOME          Storage root directory       (default: ~/.fatcat)
     FATCAT_LLM           LLM adapter                   (default: ollama)
-    FATCAT_OLLAMA_MODEL  Ollama model name            (default: gpt-oss:20b)
+    FATCAT_OLLAMA_MODEL  Ollama model name            (default: qwen3:8b)
     FATCAT_OLLAMA_HOST   Ollama host URL              (default: ollama's own default)
     FATCAT_PROJECT       Active project id            (default: "default")
     FATCAT_TRANSCRIPTS_DIR  Dir to watch in listen mode (default: none)
@@ -44,7 +44,7 @@ def detect_project_id(start: Path | None = None) -> str:
     """Best-effort project id derived from the current working directory."""
 
     return slugify_project(find_project_root(start).name)
-DEFAULT_OLLAMA_MODEL = "gpt-oss:20b"
+DEFAULT_OLLAMA_MODEL = "qwen3:8b"
 DEFAULT_MIN_CONFIDENCE = 0.6
 DEFAULT_LISTEN_INTERVAL = 10.0
 

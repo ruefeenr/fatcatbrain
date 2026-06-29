@@ -103,7 +103,9 @@ MVP, phases 1-3:
 
 - Project skeleton, hexagonal architecture (domain / application / adapters)
 - JSONL/JSON file storage
-- Ollama adapter using `gpt-oss:20b` for candidate extraction
+- Ollama adapter using `qwen3:8b` for candidate extraction (gpt-oss:20b still supported)
+- Schema-constrained Ollama extraction with thinking disabled for predictable,
+  fast structured output
 - User-curated learning questions with confirm/edit/merge/reject/defer workflow
 - Evidence quotes, importance, keywords, and session-ready metadata
 - Passive capture from chat transcripts (`listen`, `import-chat`)
@@ -120,7 +122,7 @@ SQLite, vector DB, voice/Whisper, OpenAI adapter, Textual TUI.
 - Python >= 3.14
 - [uv](https://docs.astral.sh/uv/)
 - A running [Ollama](https://ollama.com) server
-- The `gpt-oss:20b` model installed in Ollama
+- The `qwen3:8b` model installed in Ollama (or `gpt-oss:20b`)
 
 ## Setup
 
@@ -132,19 +134,19 @@ uv sync
 
 Run `fcat init` and the cat asks how it should think. It detects your local
 [Ollama](https://ollama.com) install, lists the models you have, and lets you pick
-`gpt-oss:20b`. The choice is saved to `config.json`.
+`qwen3:8b`. The choice is saved to `config.json`.
 
 Install and start the model with:
 
 ```bash
 ollama serve
-ollama pull gpt-oss:20b
+ollama pull qwen3:8b
 ```
 
 You can override the Ollama host or model per run with environment variables:
 
 ```bash
-FATCAT_LLM=ollama FATCAT_OLLAMA_MODEL=gpt-oss:20b uv run fcat brain
+FATCAT_LLM=ollama FATCAT_OLLAMA_MODEL=qwen3:8b uv run fcat brain
 ```
 
 Configuration precedence is: environment variables > `config.json` > defaults.
@@ -209,7 +211,7 @@ fcat sessions
 | ------------------ | ------------------ | ---------------------------------------- |
 | `FATCAT_HOME`         | `~/.fatcat`   | Storage root directory                   |
 | `FATCAT_LLM`          | `ollama`           | LLM adapter (currently Ollama) |
-| `FATCAT_OLLAMA_MODEL` | `gpt-oss:20b`      | Ollama model name (overrides config.json) |
+| `FATCAT_OLLAMA_MODEL` | `qwen3:8b`         | Ollama model name (overrides config.json) |
 | `FATCAT_OLLAMA_HOST`  | (ollama default)   | Ollama host URL                          |
 | `FATCAT_TRANSCRIPTS_DIR` | (none)          | Directory watched by `fcat listen`        |
 | `FATCAT_MIN_CONFIDENCE`  | `0.6`           | Min candidate confidence in listen mode  |
@@ -271,6 +273,19 @@ The mascot changes face with the situation, so the CLI feels alive:
 ```bash
 uv run pytest
 ```
+
+Extraction quality is evaluated separately from unit tests. The benchmark runner
+uses controlled cases and LongMemEval preferences without writing anything
+to FatCat's stores:
+
+```bash
+uv run fcat-benchmark run --input benchmarks/challenges/core.jsonl
+uv run fcat-benchmark download-longmemeval --variant oracle
+uv run fcat-benchmark prepare-longmemeval
+```
+
+See `benchmarks/README.md` for metrics, privacy boundaries, and the incremental
+gold-annotation workflow.
 
 ```text
  /ᐠ≽^•⩊•^≼マ  "All green? Time for a nap."

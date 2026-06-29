@@ -80,6 +80,20 @@ class Scope(BaseModel):
         return f"{self.level}:{self.reference_id}"
 
 
+class ConversationTurn(BaseModel):
+    """One role-attributed turn of a multi-message raw input.
+
+    Optional structured provenance for inputs that arrive as a dialogue. When
+    present, evidence can be traced back to the turn it came from, which lets the
+    domain enforce that only user-authored turns justify a user memory.
+    """
+
+    id: str
+    role: Literal["user", "assistant", "system"]
+    content: str
+    language: str | None = None
+
+
 class EvidenceQuote(BaseModel):
     """A minimal source excerpt supporting a candidate or confirmed item."""
 
@@ -88,6 +102,8 @@ class EvidenceQuote(BaseModel):
     source_input_id: str | None = None
     source_ref: str | None = None
     session_id: str | None = None
+    turn_id: str | None = None
+    role: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -115,6 +131,7 @@ class RawInput(BaseModel):
     project_id: str | None = None
     session_id: str | None = None
     source_ref: str | None = None
+    turns: list[ConversationTurn] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
